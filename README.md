@@ -1,29 +1,23 @@
-# Distributed WebSocket Event Backbone (Go + Redis)
+# Distributed WebSocket Event Backbone (Go)
 
-A **real-time, WebSocket-based event routing backbone** built in Go, designed with strict concurrency and architectural invariants.
+A real-time WebSocket-based event routing backbone built in Go, with Redis used for cross-instance fan-out and warm-start caching.
 
-This project evolved from a chat-style system into a **trading-style pub/sub event router**, focusing on correctness, separation of concerns, and distributed fan-out — **not frontend UI**.
-
-All interaction is done via Go programs and terminals.
+This is not a frontend project and not a chat application. All interaction is done via Go programs and terminal-based clients.
 
 ---
 
-## 🧠 Core Philosophy
+## Overview
 
-This is **not** a chat application.
+This system functions as an event backbone rather than an application.
 
-This system is an **event backbone**:
-
-- WebSocket connections are **event producers or consumers**
-- Clients **subscribe to topics (rooms)**
-- The server routes events — it does **not** execute domain logic
-- Correctness and invariants matter more than features
+- WebSocket connections act as event producers or consumers
+- Consumers subscribe to topics (rooms)
+- The server routes events only and does not execute domain logic
+- Architectural correctness and concurrency invariants are the primary focus
 
 ---
 
-## 🧱 High-Level Architecture
-
-### Per Server Instance
+## Architecture
 
 WebSocket Client
 │
@@ -34,78 +28,62 @@ WritePump() ← Hub fan-out
 ▼
 Hub (single goroutine, routing authority)
 │
-├─ Local fan-out to subscribed clients
+├─ Local room fan-out
 └─ Redis Pub/Sub (cross-instance fan-out)
 
 
-### Key Architectural Rules
-
-- Exactly **one Hub goroutine**
-- No mutexes
-- No concurrent map writes
-- All state mutation via channels
-- Hub is **routing-only**
-- Domains define meaning, Hub defines routing
-
 ---
 
-## 🧩 Core Components
+## Hub Design & Invariants
 
-### Hub
+- Exactly one Hub goroutine per server instance
+- No mutexes
+- No concurrent map writes
+- All state mutation occurs via channels
+- Hub is strictly routing-only
+- No domain logic inside Hub
+- No Redis KV access inside Hub
 
-The Hub is the **single authoritative router** per server process.
-
-Responsibilities:
-- Owns all room membership state
-- Routes events to subscribed clients
-- Publishes ingestion events to Redis Pub/Sub
-- Subscribes to Redis Pub/Sub for cross-instance fan-out
-- Ignores its own Redis echoes using `Origin`
-
-Non-responsibilities:
-- ❌ No domain validation
-- ❌ No Redis KV writes
-- ❌ No business logic
-- ❌ No blocking on clients
-
-Rooms are implemented as:
+Rooms are implemented as pure routing constructs:
 
 ```go
 map[string]map[*Client]bool
+Client Model
 
-
-Client
-
-Each client represents one WebSocket connection.
+Each WebSocket connection is represented as a Client.
 
 Roles:
 
-INGESTOR – produces domain events (e.g., price feeds)
+INGESTOR – produces domain events
 
-CONSUMER – subscribes to topics and receives updates
+CONSUMER – subscribes to rooms and receives events
 
-Each client runs:
+Each client runs two goroutines:
 
-ReadPump() → input, validation, ingestion
+ReadPump() for inbound messages
 
-WritePump() → outbound fan-out
+WritePump() for outbound messages
 
-🔄 Domain Separation
 internal/domain/
 ├── trading/
 ├── chat/
 └── common/
+Domains validate input and emit domain events
 
-
-Domains validate input
-
-Domains emit domain events
-
-Infrastructure adapts domain events → Hub events
+Infrastructure adapts domain events into Hub broadcasts
 
 Hub is completely payload-agnostic
 
-Rules
+Trading Domain
+
+Active event type: price_update
+{
+  "type": "price_update",
+  "instrument": "BTC_USDT",
+  "price": 60214.3,
+  "ts": 1710000000
+}
+Rules:
 
 Only INGESTOR clients can publish trading events
 
@@ -113,79 +91,55 @@ INGESTORS never join rooms
 
 Consumers subscribe by joining rooms
 
-Room name == instrument name
+Room name equals instrument name
 
-🌍 Redis Integration
+Redis Integration
 
-Redis is used in two strictly limited roles.
+Redis is optional and non-authoritative.
 
-1️⃣ Redis Pub/Sub (Event Bus)
+Redis Pub/Sub
 
 Used for cross-instance fan-out
 
-Messages include Origin
+Messages include an Origin field
 
-Instances ignore their own echoes
+Instances ignore their own Redis echoes
 
 No ordering guarantees
 
 No persistence
 
-Redis failure → system degrades to single-instance operation
-
-2️⃣ Redis KV (Ephemeral Cache)
-
-Used only for warm-starting consumers
+Redis KV (Ephemeral Cache)
 
 Stores last known price per instrument
 
-TTL-based (ephemeral)
+TTL-based
+
+Used only to warm-start new consumers
 
 Written only at ingestion time
 
 Never written inside the Hub
 
-Not authoritative
+Redis failure degrades the system to single-instance operation.
 
-Redis failure → no warm-start, system still functions
-
-🔑 Critical Design Decision (Invariant)
-
-Redis KV writes happen at the ingestion boundary, not in the Hub.
-
-Specifically:
-
-KV writes occur inside ReadPump() for INGESTOR clients
-
-The Hub remains a pure router
-
-This avoids:
-
-Redis echo confusion
-
-Duplicate writes
-
-Routing logic leaking into infrastructure
-
-🧪 Verified Behavior
+Verified Behavior
 
 Local routing works without Redis
 
-Redis Pub/Sub fan-out works across instances
+Redis Pub/Sub enables cross-instance fan-out
 
-Redis KV stores last known prices with TTL
+Redis KV warm-starts new consumers
 
-New consumers receive one warm-start event
+TTL expiration works correctly
 
-Feed stops → no continuous updates
+Redis can go down without breaking local routing
 
-Redis down → system still works locally
+Current State
 
-🎯 Current State
+Stable event routing backbone
 
-Stable event routing
-
-Redis Pub/Sub + KV fully integrated
+Redis Pub/Sub and KV fully integrated
 
 Hub invariants preserved
 
@@ -193,44 +147,18 @@ No frontend
 
 No persistence or replay
 
-No Kafka / NATS
+No Kafka or NATS
 
-🔮 Planned (Not Implemented)
+Purpose
 
-Authentication & API keys for INGESTORS
-
-Read-only consumer enforcement
-
-Event ordering guarantees
-
-Persistence & replay
-
-Kafka / NATS integration
-
-Risk / analytics services
-
-🧠 Learning Goals
-
-This project focuses on:
+This project exists to explore and practice:
 
 Concurrency correctness
 
 Single-writer state ownership
 
+Event routing design
+
 Distributed fan-out
 
-Failure-aware design
-
-Clean separation of domain and infrastructure
-
-📌 How to Run
-
-Multiple terminals are used:
-
-Redis server
-
-One or more backend server instances
-
-WebSocket INGESTOR clients
-
-WebSocket CONSUMER clients
+Failure-aware backend system architecture
