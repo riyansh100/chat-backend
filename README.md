@@ -1,147 +1,77 @@
-# Distributed WebSocket Event Backbone (Go)
+# Distributed WebSocket Event Backbone
 
-A real-time WebSocket-based event routing backbone built in Go, with Redis used for cross-instance fan-out and warm-start caching.
+A real-time WebSocket-based event routing system built in Go.
 
-> **Note**: This is not a frontend project and not a chat application. All interaction is done via Go programs and terminal-based clients.
+This project is an event backbone, not a chat application and not a frontend system.  
+All interaction is done via Go programs and terminal-based WebSocket clients.
 
 ---
 
 ## Overview
 
-This system functions as an event backbone rather than an application.
-
 - WebSocket connections act as event producers or consumers
 - Consumers subscribe to topics (rooms)
-- The server routes events only and does not execute domain logic
-- Architectural correctness and concurrency invariants are the primary focus
+- The server routes events only
+- Domain logic is separated from routing logic
+- Focus on correctness, concurrency, and clean architecture
 
 ---
 
 ## Architecture
 
-WebSocket Client
-│
-▼
-ReadPump() → domain validation → BroadcastEvent
-WritePump() ← Hub fan-out
-│
-▼
-Hub (single goroutine, routing authority)
-│
-├─ Local room fan-out
-└─ Redis Pub/Sub (cross-instance fan-out)
+- Single Hub goroutine per server instance
+- Hub owns all routing state
+- No mutexes
+- No concurrent map writes
+- All state mutation via channels
+- Hub is routing-only and payload-agnostic
 
 ---
 
-## Hub Design & Invariants
+## Core Components
 
-- Exactly one Hub goroutine per server instance
-- No mutexes
-- No concurrent map writes
-- All state mutation occurs via channels
-- Hub is strictly routing-only
-- No domain logic inside Hub
-- No Redis KV access inside Hub
+- Hub
+- WebSocket Clients
+- Domain modules (trading, chat, common)
+- Redis (optional)
 
-**Rooms** are implemented as pure routing constructs:
+---
 
-```go
-map[string]map[*Client]bool
+## Trading Domain
 
+- Event type: `price_update`
+- Room name equals instrument name
+- Only INGESTOR clients can publish events
+- INGESTORS never join rooms
+- Consumers subscribe by joining rooms
 
-Client Model
-Each WebSocket connection is represented as a Client.
+---
 
-Roles:
+## Redis Integration
 
-INGESTOR – produces domain events
+- Redis Pub/Sub used for cross-instance fan-out
+- Redis KV used for warm-starting consumers
+- Redis is not authoritative
+- Redis failure degrades system to single-instance mode
 
-CONSUMER – subscribes to rooms and receives events
+---
 
-Each client runs two goroutines:
+## Current State
 
-ReadPump() for inbound messages
+- Redis Pub/Sub and KV fully integrated
+- Hub invariants preserved
+- No frontend
+- No persistence or replay
+- No Kafka or NATS
 
-WritePump() for outbound messages
+---
 
+## Purpose
 
+This project is built to practice backend and distributed systems concepts such as:
 
-internal/domain/
-├── trading/
-├── chat/
-└── common/
-
-
-Rules:
-
-Only INGESTOR clients can publish trading events
-
-INGESTORS never join rooms
-
-Consumers subscribe by joining rooms
-
-Room name equals instrument name
-
-Redis Integration
-Redis is optional and non-authoritative.
-
-Redis Pub/Sub
-Used for cross-instance fan-out
-
-Messages include an Origin field
-
-Instances ignore their own Redis echoes
-
-No ordering guarantees
-
-No persistence
-
-Redis KV (Ephemeral Cache)
-Stores last known price per instrument
-
-TTL-based
-
-Used only to warm-start new consumers
-
-Written only at ingestion time
-
-Never written inside the Hub
-
-Redis failure degrades the system to single-instance operation.
-
-Verified Behavior
-✅ Local routing works without Redis
-
-✅ Redis Pub/Sub enables cross-instance fan-out
-
-✅ Redis KV warm-starts new consumers
-
-✅ TTL expiration works correctly
-
-✅ Redis can go down without breaking local routing
-
-Current State
-✅ Stable event routing backbone
-
-✅ Redis Pub/Sub and KV fully integrated
-
-✅ Hub invariants preserved
-
-❌ No frontend
-
-❌ No persistence or replay
-
-❌ No Kafka or NATS
-
-Purpose
-This project exists to explore and practice:
-
-ncurrency correctness
-
-Single-writer state ownership
-
-Event routing design
-
-Distributed fan-out
-
-Failure-aware backend system architecture
+- Concurrency correctness
+- Single-writer state ownership
+- Event routing
+- Distributed fan-out
+- Failure-aware system design
