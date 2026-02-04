@@ -13,4 +13,5 @@ type LeaveRoomEvent struct {
 type BroadcastEvent struct {
 	Room    string
 	Message Message
+	Origin  string // instanceID of the source
 }

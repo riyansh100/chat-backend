@@ -5,7 +5,9 @@ package ws
 import (
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/riyansh/chat-backend/internal/domain/trading"
 	"github.com/riyansh/chat-backend/internal/hub"
 )
 
@@ -20,11 +22,13 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 	}
 
 	client := &hub.Client{
-		ID:    conn.RemoteAddr().String(),
+		ID:    uuid.NewString(),
 		Conn:  conn,
-		Hub:   h,
 		Send:  make(chan hub.Message, 256),
 		Rooms: make(map[string]bool),
+		Hub:   h,
+
+		Role: string(trading.RoleConsumer),
 	}
 
 	h.Register <- client

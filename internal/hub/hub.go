@@ -1,12 +1,16 @@
 package hub
 
-import "github.com/redis/go-redis/v9"
+import (
+	goredis "github.com/redis/go-redis/v9"
+	chatredis "github.com/riyansh/chat-backend/internal/redis"
+)
 
 type Hub struct {
 	Rooms       map[string]*Room
-	RedisClient *redis.Client
-	Register    chan *Client
-	Unregister  chan *Client
+	RedisClient *goredis.Client
+
+	Register   chan *Client
+	Unregister chan *Client
 
 	JoinRoom  chan JoinRoomEvent
 	LeaveRoom chan LeaveRoomEvent
@@ -14,4 +18,6 @@ type Hub struct {
 	Broadcast chan BroadcastEvent
 
 	InstanceID string
+
+	redisCache chatredis.Cache
 }

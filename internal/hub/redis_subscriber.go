@@ -28,7 +28,8 @@ func StartRedisSubscriber(
 			}
 
 			h.Broadcast <- BroadcastEvent{
-				Room: rm.Room,
+				Room:   rm.Room,
+				Origin: rm.Origin,
 				Message: Message{
 					Type: rm.Type,
 					Data: rm.Data,

@@ -5,6 +5,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
+
+	chatredis "github.com/riyansh/chat-backend/internal/redis"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -21,31 +24,40 @@ func main() {
 	log.Println("instanceID:", instanceID)
 
 	// ------------------------------------------------
-	// 2. Hub
-	// ------------------------------------------------
-	h := hub.NewHub(instanceID)
-	go h.Run()
-
-	// ------------------------------------------------
-	// 3. Redis
+	// 2. Redis client (CREATE FIRST)
 	// ------------------------------------------------
 	rdb := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
+
+	// ------------------------------------------------
+	// 3. Redis in-memory cache (KV)
+	// ------------------------------------------------
+	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
+
+	// ------------------------------------------------
+	// 4. Hub
+	// ------------------------------------------------
+	h := hub.NewHub(instanceID, redisCache)
 	h.RedisClient = rdb
 
 	ctx := context.Background()
 	hub.StartRedisSubscriber(ctx, rdb, h)
 
+	// Start Hub loop
+	go h.Run()
+
 	// ------------------------------------------------
-	// 4. WebSocket handler
+	// 5. WebSocket handlers
 	// ------------------------------------------------
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, w, r)
 	})
 
+	http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
+
 	// ------------------------------------------------
-	// 5. Configurable port (KEY CHANGE)
+	// 6. Server
 	// ------------------------------------------------
 	port := os.Getenv("PORT")
 	if port == "" {

@@ -1,9 +1,14 @@
 package hub
 
 import (
+	"context"
 	"time"
 
+	"github.com/riyansh/chat-backend/internal/domain/chat"
+	"github.com/riyansh/chat-backend/internal/domain/common"
+
 	"github.com/gorilla/websocket"
+	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
 const (
@@ -49,26 +54,115 @@ func (c *Client) ReadPump() {
 	})
 
 	for {
-		var msg Message
-		if err := c.Conn.ReadJSON(&msg); err != nil {
+		var raw map[string]interface{}
+
+		// Read raw JSON (transport responsibility only)
+		if err := c.Conn.ReadJSON(&raw); err != nil {
 			break
 		}
 
-		switch msg.Type {
-		case "join":
-			c.Hub.JoinRoom <- JoinRoomEvent{Client: c, Room: msg.Room}
+		// Extract type
+		msgType, ok := raw["type"].(string)
+		if !ok {
+			continue
+		}
+		delete(raw, "type")
 
-		case "leave":
-			c.Hub.LeaveRoom <- LeaveRoomEvent{Client: c, Room: msg.Room}
+		// Build domain envelope
+		env := common.Envelope{
+			Type: msgType,
+			Body: raw,
+		}
 
-		case "message":
-			if !c.Rooms[msg.Room] {
+		switch c.Role {
+
+		case string(trading.RoleConsumer):
+
+			chatEvents, err := chat.ValidateAndTranslate(env, c.Rooms)
+			if err != nil {
 				continue
 			}
 
-			c.Hub.Broadcast <- BroadcastEvent{
-				Room:    msg.Room,
-				Message: msg,
+			for _, e := range chatEvents {
+				switch ev := e.(type) {
+
+				case chat.JoinEvent:
+					c.Hub.JoinRoom <- JoinRoomEvent{
+						Client: c,
+						Room:   ev.Room,
+					}
+
+				case chat.LeaveEvent:
+					c.Hub.LeaveRoom <- LeaveRoomEvent{
+						Client: c,
+						Room:   ev.Room,
+					}
+
+				case chat.MessageEvent:
+					c.Hub.Broadcast <- BroadcastEvent{
+						Room:   ev.Room,
+						Origin: c.Hub.InstanceID,
+						Message: Message{
+							Room: ev.Room,
+							Data: ev.Data,
+						},
+					}
+				}
+			}
+
+		case string(trading.RoleIngestor):
+
+			tradingEvents, err := trading.ValidateAndTranslate(env, trading.RoleIngestor)
+			if err != nil {
+				continue
+			}
+
+			for _, e := range tradingEvents {
+				switch ev := e.(type) {
+
+				case trading.PriceUpdateEvent:
+					// c.Hub.Broadcast <- BroadcastEvent{
+					// 	Room:   ev.Instrument,
+					// 	Origin: c.Hub.InstanceID,
+					// 	Message: Message{
+					// 		Room: ev.Instrument,
+					// 		Data: map[string]interface{}{
+					// 			"type":       "price_update",
+					// 			"price":      ev.Price,
+					// 			"ts":         ev.Timestamp,
+					// 			"instrument": ev.Instrument,
+					// 		},
+					// 	},
+					// }
+
+					if c.Hub.redisCache != nil {
+						_ = c.Hub.redisCache.SetLastPrice(
+							context.Background(),
+							ev.Instrument,
+							map[string]interface{}{
+								"type":       "price_update",
+								"price":      ev.Price,
+								"ts":         ev.Timestamp,
+								"instrument": ev.Instrument,
+							},
+						)
+					}
+
+					c.Hub.Broadcast <- BroadcastEvent{
+						Room:   ev.Instrument,
+						Origin: c.Hub.InstanceID,
+						Message: Message{
+							Room: ev.Instrument,
+							Data: map[string]interface{}{
+								"type":       "price_update",
+								"price":      ev.Price,
+								"ts":         ev.Timestamp,
+								"instrument": ev.Instrument,
+							},
+						},
+					}
+
+				}
 			}
 		}
 	}

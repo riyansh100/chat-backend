@@ -36,6 +36,26 @@ func (h *Hub) Run() {
 
 			fmt.Println(event.Client.ID, "joined", event.Room)
 
+			// 🔥 STEP 5 — Warm-start from Redis (OPTIONAL, SAFE)
+			if h.redisCache != nil {
+				data, err := h.redisCache.GetLastPrice(
+					context.Background(),
+					event.Room,
+				)
+
+				if err == nil {
+					select {
+					case event.Client.Send <- Message{
+						Type: event.Room,
+						Data: json.RawMessage(data),
+					}:
+					default:
+						// slow client — system health > client
+						h.Unregister <- event.Client
+					}
+				}
+			}
+
 		case event := <-h.LeaveRoom:
 			if room, ok := h.Rooms[event.Room]; ok {
 				delete(room.Clients, event.Client)
@@ -45,7 +65,31 @@ func (h *Hub) Run() {
 
 		case event := <-h.Broadcast:
 
-			room := h.Rooms[event.Room]
+			// DEBUG (temporary – you can remove later)
+			fmt.Println(
+				"DEBUG ORIGIN CHECK:",
+				"event.Origin =", event.Origin,
+				"hub.InstanceID =", h.InstanceID,
+			)
+			fmt.Println("DEBUG redisCache nil?", h.redisCache == nil)
+			fmt.Println("DEBUG event origin:", event.Origin)
+
+			// 🧠 Redis KV write — ONLY for locally-originated events
+			// if h.redisCache != nil && event.Origin == h.InstanceID {
+			// 	fmt.Println("DEBUG writing KV for room:", event.Room)
+			// 	_ = h.redisCache.SetLastPrice(
+			// 		context.Background(),
+			// 		event.Room,
+			// 		event.Message.Data,
+			// 	)
+			// }
+
+			// 🔁 Local fan-out (always happens)
+			room, ok := h.Rooms[event.Room]
+			if !ok {
+				continue
+			}
+
 			for client := range room.Clients {
 				select {
 				case client.Send <- event.Message:
@@ -54,22 +98,24 @@ func (h *Hub) Run() {
 				}
 			}
 
-			// 🔹 publish to Redis (fire-and-forget)
-			rm := RedisMessage{
-				Room:   event.Room,
-				Type:   event.Message.Type,
-				Data:   event.Message.Data,
-				Origin: h.InstanceID,
+			// 🔹 Redis bus publish — ONLY for locally-originated events
+			if event.Origin == h.InstanceID {
+				rm := RedisMessage{
+					Room:   event.Room,
+					Type:   event.Message.Type,
+					Data:   event.Message.Data,
+					Origin: h.InstanceID,
+				}
+
+				payload, _ := json.Marshal(rm)
+
+				go h.RedisClient.Publish(
+					context.Background(),
+					"chat:events",
+					payload,
+				)
 			}
 
-			payload, _ := json.Marshal(rm)
-
-			go h.RedisClient.Publish(
-				context.Background(),
-				"chat:events",
-				payload,
-			)
 		}
-
 	}
 }
