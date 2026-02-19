@@ -20,14 +20,14 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-
+	//apiKey := r.Header.Get("X-API-Key")
 	client := &hub.Client{
 		ID:    uuid.NewString(),
 		Conn:  conn,
 		Send:  make(chan hub.Message, 256),
 		Rooms: make(map[string]bool),
 		Hub:   h,
-
+		//APIKey: apiKey,
 		Role: string(trading.RoleConsumer),
 	}
 

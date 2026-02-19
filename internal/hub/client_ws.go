@@ -2,12 +2,12 @@ package hub
 
 import (
 	"context"
+	"strconv"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/riyansh/chat-backend/internal/domain/chat"
 	"github.com/riyansh/chat-backend/internal/domain/common"
-
-	"github.com/gorilla/websocket"
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
@@ -42,6 +42,7 @@ func (c *Client) WritePump() {
 }
 
 func (c *Client) ReadPump() {
+
 	defer func() {
 		c.Hub.Unregister <- c
 		c.Conn.Close()
@@ -121,43 +122,39 @@ func (c *Client) ReadPump() {
 				switch ev := e.(type) {
 
 				case trading.PriceUpdateEvent:
-					// c.Hub.Broadcast <- BroadcastEvent{
-					// 	Room:   ev.Instrument,
-					// 	Origin: c.Hub.InstanceID,
-					// 	Message: Message{
-					// 		Room: ev.Instrument,
-					// 		Data: map[string]interface{}{
-					// 			"type":       "price_update",
-					// 			"price":      ev.Price,
-					// 			"ts":         ev.Timestamp,
-					// 			"instrument": ev.Instrument,
-					// 		},
-					// 	},
-					// }
 
+					// --- Phase 4: Redis KV warm-start write (production-safe) ---
 					if c.Hub.redisCache != nil {
+
+						ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+
+						// ✅ Redis key uses InstrumentID (Stage A change)
 						_ = c.Hub.redisCache.SetLastPrice(
-							context.Background(),
-							ev.Instrument,
+							ctx,
+							strconv.Itoa(ev.InstrumentID),
 							map[string]interface{}{
 								"type":       "price_update",
 								"price":      ev.Price,
 								"ts":         ev.Timestamp,
-								"instrument": ev.Instrument,
+								"instrument": ev.Instrument, // ⚠️ keep string for now
 							},
 						)
+
+						cancel()
 					}
 
+					// ✅ Broadcast still uses STRING room (Stage A safety)
+					roomID := strconv.Itoa(ev.InstrumentID)
 					c.Hub.Broadcast <- BroadcastEvent{
-						Room:   ev.Instrument,
+						Room:   roomID,
 						Origin: c.Hub.InstanceID,
 						Message: Message{
-							Room: ev.Instrument,
+							Room: roomID,
 							Data: map[string]interface{}{
 								"type":       "price_update",
 								"price":      ev.Price,
 								"ts":         ev.Timestamp,
-								"instrument": ev.Instrument,
+								"instrument": ev.Instrument, // keep string
 							},
 						},
 					}

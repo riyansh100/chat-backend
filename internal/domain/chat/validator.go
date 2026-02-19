@@ -24,7 +24,7 @@ func ValidateAndTranslate(
 			return nil, common.ErrNonFatal
 		}
 		return []Event{LeaveEvent{Room: room}}, nil
-
+		//fmt.Println("skjdb sdkjfbsdkf")
 	case TypeMessage:
 		room, ok := env.Body["room"].(string)
 		if !ok || room == "" {

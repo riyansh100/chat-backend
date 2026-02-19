@@ -4,15 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+
+	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
 func (h *Hub) Run() {
 	for {
 		select {
 
+		// ---------------- REGISTER ----------------
 		case client := <-h.Register:
 			fmt.Println("Register client:", client.ID)
 
+		// ---------------- UNREGISTER ----------------
 		case client := <-h.Unregister:
 			fmt.Println("Unregistering client:", client.ID)
 			for roomName := range client.Rooms {
@@ -21,51 +26,69 @@ func (h *Hub) Run() {
 				}
 			}
 
+		// ---------------- JOIN ROOM ----------------
 		case event := <-h.JoinRoom:
-			room, ok := h.Rooms[event.Room]
+
+			roomName := event.Room
+
+			// 🔥 Stage B1 — accept symbol OR numeric ID
+			if id, ok := trading.SymbolToID[roomName]; ok {
+				roomName = strconv.Itoa(id)
+			}
+
+			room, ok := h.Rooms[roomName]
 			if !ok {
 				room = &Room{
-					Name:    event.Room,
+					Name:    roomName,
 					Clients: make(map[*Client]bool),
 				}
-				h.Rooms[event.Room] = room
+				h.Rooms[roomName] = room
 			}
 
 			room.Clients[event.Client] = true
-			event.Client.Rooms[event.Room] = true
+			event.Client.Rooms[roomName] = true
 
-			fmt.Println(event.Client.ID, "joined", event.Room)
+			fmt.Println(event.Client.ID, "joined", roomName)
 
-			// 🔥 STEP 5 — Warm-start from Redis (OPTIONAL, SAFE)
+			// 🔥 Warm-start from Redis (already numeric-safe)
 			if h.redisCache != nil {
 				data, err := h.redisCache.GetLastPrice(
 					context.Background(),
-					event.Room,
+					roomName,
 				)
 
 				if err == nil {
 					select {
 					case event.Client.Send <- Message{
-						Type: event.Room,
+						Type: roomName,
 						Data: json.RawMessage(data),
 					}:
 					default:
-						// slow client — system health > client
 						h.Unregister <- event.Client
 					}
 				}
 			}
 
+		// ---------------- LEAVE ROOM ----------------
 		case event := <-h.LeaveRoom:
-			if room, ok := h.Rooms[event.Room]; ok {
-				delete(room.Clients, event.Client)
-				fmt.Println(event.Client.ID, "left", event.Room)
-			}
-			delete(event.Client.Rooms, event.Room)
 
+			roomName := event.Room
+
+			// 🔥 same dual-accept conversion for leave
+			if id, ok := trading.SymbolToID[roomName]; ok {
+				roomName = strconv.Itoa(id)
+			}
+
+			if room, ok := h.Rooms[roomName]; ok {
+				delete(room.Clients, event.Client)
+				fmt.Println(event.Client.ID, "left", roomName)
+			}
+			delete(event.Client.Rooms, roomName)
+
+		// ---------------- BROADCAST ----------------
 		case event := <-h.Broadcast:
 
-			// DEBUG (temporary – you can remove later)
+			// DEBUG logs (safe to keep for now)
 			fmt.Println(
 				"DEBUG ORIGIN CHECK:",
 				"event.Origin =", event.Origin,
@@ -74,17 +97,7 @@ func (h *Hub) Run() {
 			fmt.Println("DEBUG redisCache nil?", h.redisCache == nil)
 			fmt.Println("DEBUG event origin:", event.Origin)
 
-			// 🧠 Redis KV write — ONLY for locally-originated events
-			// if h.redisCache != nil && event.Origin == h.InstanceID {
-			// 	fmt.Println("DEBUG writing KV for room:", event.Room)
-			// 	_ = h.redisCache.SetLastPrice(
-			// 		context.Background(),
-			// 		event.Room,
-			// 		event.Message.Data,
-			// 	)
-			// }
-
-			// 🔁 Local fan-out (always happens)
+			// 🔁 Local fan-out (unchanged — still string room for Stage A compatibility)
 			room, ok := h.Rooms[event.Room]
 			if !ok {
 				continue
@@ -115,7 +128,6 @@ func (h *Hub) Run() {
 					payload,
 				)
 			}
-
 		}
 	}
 }

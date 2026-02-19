@@ -10,4 +10,6 @@ type Client struct {
 	Hub   *Hub
 
 	Role string // NEW: domain-agnostic role (default CONSUMER)
+	//APIKey        string
+	//Authenticated bool
 }

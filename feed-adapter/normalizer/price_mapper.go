@@ -1,6 +1,6 @@
 package normalizer
 
-import "github.com/riyanshsachdev/feed-adapter/exchange"
+import "github.com/riyansh/chat-backend/feed-adapter/exchange"
 
 type PriceUpdateEvent struct {
 	Type       string  `json:"type"`
@@ -15,5 +15,14 @@ func MapToDomain(raw exchange.RawPrice) PriceUpdateEvent {
 		Instrument: raw.Instrument,
 		Price:      raw.Price,
 		Timestamp:  raw.Timestamp,
+	}
+}
+
+func PriceUpdateFromNormalized(n exchange.NormalizedPriceEvent) interface{} {
+	return PriceUpdateEvent{
+		Type:       "price_update",
+		Instrument: n.Instrument,
+		Price:      n.Price,
+		Timestamp:  n.Timestamp,
 	}
 }

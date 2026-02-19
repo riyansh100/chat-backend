@@ -1,6 +1,10 @@
 package trading
 
-import "github.com/riyansh/chat-backend/internal/domain/common"
+import (
+	"errors"
+
+	"github.com/riyansh/chat-backend/internal/domain/common"
+)
 
 func ValidateAndTranslate(
 	env common.Envelope,
@@ -30,11 +34,18 @@ func ValidateAndTranslate(
 			return nil, common.ErrNonFatal
 		}
 
+		// --- NEW STEP: lookup InstrumentID from metadata ---
+		id, ok := SymbolToID[instrument]
+		if !ok {
+			return nil, errors.New("unknown instrument")
+		}
+
 		return []Event{
 			PriceUpdateEvent{
-				Instrument: instrument,
-				Price:      price,
-				Timestamp:  int64(ts),
+				Instrument:   instrument,
+				InstrumentID: id, // <-- NEW FIELD
+				Price:        price,
+				Timestamp:    int64(ts),
 			},
 		}, nil
 	}

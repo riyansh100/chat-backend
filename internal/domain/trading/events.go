@@ -6,9 +6,10 @@ type Event interface{}
 
 // Market data update
 type PriceUpdateEvent struct {
-	Instrument string
-	Price      float64
-	Timestamp  int64
+	Instrument   string
+	InstrumentID int
+	Price        float64
+	Timestamp    int64
 }
 
 // Order placement
