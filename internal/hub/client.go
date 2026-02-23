@@ -9,7 +9,8 @@ type Client struct {
 	Rooms map[string]bool
 	Hub   *Hub
 
-	Role string // NEW: domain-agnostic role (default CONSUMER)
+	Dropped int
+	Role    string // NEW: domain-agnostic role (default CONSUMER)
 	//APIKey        string
 	//Authenticated bool
 }

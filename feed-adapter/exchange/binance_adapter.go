@@ -88,7 +88,7 @@ func (a *BinanceAdapter) connectAndStream(ctx context.Context) error {
 			continue
 		}
 
-		//log.Println("NORMALIZED OK")
+		//log.Println("NORMALIZED OK:", event)
 
 		select {
 		case a.Out <- event:
@@ -99,9 +99,21 @@ func (a *BinanceAdapter) connectAndStream(ctx context.Context) error {
 }
 
 func normalize(msg []byte) (NormalizedPriceEvent, error) {
+	// First try to detect multi-stream wrapper
+	var wrapper struct {
+		Stream string          `json:"stream"`
+		Data   json.RawMessage `json:"data"`
+	}
+
+	// Try to unmarshal into wrapper
+	if err := json.Unmarshal(msg, &wrapper); err == nil && wrapper.Data != nil {
+		// Multi-stream format → unwrap
+		msg = wrapper.Data
+	}
+
 	var raw map[string]interface{}
 
-	// Parse generic JSON
+	// Parse actual trade payload
 	if err := json.Unmarshal(msg, &raw); err != nil {
 		return NormalizedPriceEvent{}, err
 	}
@@ -114,7 +126,17 @@ func normalize(msg []byte) (NormalizedPriceEvent, error) {
 
 	symbol, _ := raw["s"].(string)
 	priceStr, _ := raw["p"].(string)
-	tsFloat, _ := raw["T"].(float64)
+
+	// Binance sometimes sends numbers differently — handle safely
+	var ts int64
+	switch v := raw["T"].(type) {
+	case float64:
+		ts = int64(v)
+	case int64:
+		ts = v
+	default:
+		return NormalizedPriceEvent{}, nil
+	}
 
 	if symbol == "" || priceStr == "" {
 		return NormalizedPriceEvent{}, nil
@@ -129,7 +151,7 @@ func normalize(msg []byte) (NormalizedPriceEvent, error) {
 		Type:       "price_update",
 		Instrument: canonicalInstrument(symbol),
 		Price:      price,
-		Timestamp:  int64(tsFloat),
+		Timestamp:  ts,
 	}, nil
 }
 

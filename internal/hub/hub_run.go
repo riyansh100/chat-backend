@@ -9,6 +9,8 @@ import (
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
+const maxDroppedMessages = 5
+
 func (h *Hub) Run() {
 	for {
 		select {
@@ -31,7 +33,7 @@ func (h *Hub) Run() {
 
 			roomName := event.Room
 
-			// 🔥 Stage B1 — accept symbol OR numeric ID
+			// Accept symbol OR numeric ID
 			if id, ok := trading.SymbolToID[roomName]; ok {
 				roomName = strconv.Itoa(id)
 			}
@@ -50,7 +52,7 @@ func (h *Hub) Run() {
 
 			fmt.Println(event.Client.ID, "joined", roomName)
 
-			// 🔥 Warm-start from Redis (already numeric-safe)
+			// Warm-start from Redis
 			if h.redisCache != nil {
 				data, err := h.redisCache.GetLastPrice(
 					context.Background(),
@@ -59,12 +61,21 @@ func (h *Hub) Run() {
 
 				if err == nil {
 					select {
+
+					// Successful warm-start delivery
 					case event.Client.Send <- Message{
 						Type: roomName,
 						Data: json.RawMessage(data),
 					}:
+						event.Client.Dropped = 0
+
+					// Warm-start drop
 					default:
-						h.Unregister <- event.Client
+						event.Client.Dropped++
+						if event.Client.Dropped > maxDroppedMessages {
+							fmt.Println("Disconnecting slow client:", event.Client.ID, "drops:", event.Client.Dropped)
+							h.Unregister <- event.Client
+						}
 					}
 				}
 			}
@@ -74,7 +85,6 @@ func (h *Hub) Run() {
 
 			roomName := event.Room
 
-			// 🔥 same dual-accept conversion for leave
 			if id, ok := trading.SymbolToID[roomName]; ok {
 				roomName = strconv.Itoa(id)
 			}
@@ -88,16 +98,6 @@ func (h *Hub) Run() {
 		// ---------------- BROADCAST ----------------
 		case event := <-h.Broadcast:
 
-			// DEBUG logs (safe to keep for now)
-			fmt.Println(
-				"DEBUG ORIGIN CHECK:",
-				"event.Origin =", event.Origin,
-				"hub.InstanceID =", h.InstanceID,
-			)
-			fmt.Println("DEBUG redisCache nil?", h.redisCache == nil)
-			fmt.Println("DEBUG event origin:", event.Origin)
-
-			// 🔁 Local fan-out (unchanged — still string room for Stage A compatibility)
 			room, ok := h.Rooms[event.Room]
 			if !ok {
 				continue
@@ -105,13 +105,23 @@ func (h *Hub) Run() {
 
 			for client := range room.Clients {
 				select {
+
+				// ✅ Successful delivery → reset drop counter
 				case client.Send <- event.Message:
+					client.Dropped = 0
+
+				// ❌ Client too slow → count drop
 				default:
-					h.Unregister <- client
+					client.Dropped++
+
+					if client.Dropped > maxDroppedMessages {
+						fmt.Println("Disconnecting slow client:", client.ID, "drops:", client.Dropped)
+						h.Unregister <- client
+					}
 				}
 			}
 
-			// 🔹 Redis bus publish — ONLY for locally-originated events
+			// Redis bus publish — ONLY for locally-originated events
 			if event.Origin == h.InstanceID {
 				rm := RedisMessage{
 					Room:   event.Room,
@@ -119,9 +129,7 @@ func (h *Hub) Run() {
 					Data:   event.Message.Data,
 					Origin: h.InstanceID,
 				}
-
 				payload, _ := json.Marshal(rm)
-
 				go h.RedisClient.Publish(
 					context.Background(),
 					"chat:events",

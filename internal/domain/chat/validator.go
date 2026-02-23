@@ -46,7 +46,10 @@ func ValidateAndTranslate(
 				Data: data,
 			},
 		}, nil
+
 	}
+
+	//fmt.Println("VALIDATED:", instrument)
 
 	return nil, common.ErrNonFatal
 }

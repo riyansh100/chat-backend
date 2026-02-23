@@ -4,16 +4,19 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("Usage: go run main.go [btc|eth|both]")
+		log.Fatal("Usage: go run main.go [instrument_id | id1,id2,...]")
 	}
 
-	mode := os.Args[1]
+	// Accept numeric IDs (example: 101 or 101,102)
+	input := os.Args[1]
+	rooms := strings.Split(input, ",")
 
 	u := url.URL{
 		Scheme: "ws",
@@ -28,36 +31,28 @@ func main() {
 	}
 	defer conn.Close()
 
-	// Subscribe based on mode
-	switch mode {
-	case "btc":
-		join(conn, "BTC_USDT")
-	case "eth":
-		join(conn, "ETH_USDT")
-	case "both":
-		join(conn, "BTC_USDT")
-		join(conn, "ETH_USDT")
-	default:
-		log.Fatal("Invalid option. Use btc | eth | both")
+	// Join all requested numeric rooms
+	for _, room := range rooms {
+		room = strings.TrimSpace(room)
+		join(conn, room)
+		log.Println("Subscribed to instrument ID:", room)
 	}
 
-	log.Printf("Subscribed mode: %s\n", mode)
-
-	// Read events
+	// Read events continuously
 	for {
 		var msg map[string]interface{}
 		if err := conn.ReadJSON(&msg); err != nil {
 			log.Println("read error:", err)
 			return
 		}
-		log.Printf("EVENT RECEIVED (%s): %+v\n", mode, msg)
+		log.Printf("EVENT RECEIVED (%s): %+v\n", input, msg)
 	}
 }
 
 func join(conn *websocket.Conn, room string) {
 	err := conn.WriteJSON(map[string]string{
 		"type": "join",
-		"room": room,
+		"room": room, // send numeric ID directly
 	})
 	if err != nil {
 		log.Fatal("join error:", err)

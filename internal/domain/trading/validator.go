@@ -2,6 +2,7 @@ package trading
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/riyansh/chat-backend/internal/domain/common"
 )
@@ -39,6 +40,8 @@ func ValidateAndTranslate(
 		if !ok {
 			return nil, errors.New("unknown instrument")
 		}
+
+		fmt.Println("VALIDATED:", instrument)
 
 		return []Event{
 			PriceUpdateEvent{
