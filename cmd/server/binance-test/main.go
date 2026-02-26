@@ -21,7 +21,7 @@ func main() {
 	out := make(chan exchange.NormalizedPriceEvent, 100)
 
 	adapter := &exchange.BinanceAdapter{
-		Endpoint: "wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade",
+		Endpoint: "wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade/bnbusdt@trade/xrpusdt@trade/solusdt@trade/adausdt@trade/dogeusdt@trade/maticusdt@trade/ltcusdt@trade/dotusdt@trade",
 		Out:      out,
 	}
 
