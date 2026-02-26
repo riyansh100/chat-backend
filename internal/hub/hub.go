@@ -2,6 +2,7 @@ package hub
 
 import (
 	goredis "github.com/redis/go-redis/v9"
+	"github.com/riyansh/chat-backend/internal/cache"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -20,4 +21,6 @@ type Hub struct {
 	InstanceID string
 
 	redisCache chatredis.Cache
+
+	l1 *cache.L1Cache
 }

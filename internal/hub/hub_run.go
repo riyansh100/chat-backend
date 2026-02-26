@@ -52,7 +52,28 @@ func (h *Hub) Run() {
 
 			fmt.Println(event.Client.ID, "joined", roomName)
 
-			// Warm-start from Redis
+			// ---------------- L1 CACHE CHECK ----------------
+			key := fmt.Sprintf("instrument:%s:last", roomName)
+
+			if val, ok := h.l1.Get(key); ok {
+				if msg, ok := val.(Message); ok {
+					fmt.Println("L1 HIT:", roomName)
+					select {
+					case event.Client.Send <- msg:
+						event.Client.Dropped = 0
+					default:
+						event.Client.Dropped++
+						if event.Client.Dropped > maxDroppedMessages {
+							fmt.Println("Disconnecting slow client:", event.Client.ID, "drops:", event.Client.Dropped)
+							h.Unregister <- event.Client
+						}
+
+					}
+					continue // Skip Redis if L1 hit
+				}
+			}
+
+			// ---------------- REDIS FALLBACK ----------------
 			if h.redisCache != nil {
 				data, err := h.redisCache.GetLastPrice(
 					context.Background(),
@@ -60,16 +81,18 @@ func (h *Hub) Run() {
 				)
 
 				if err == nil {
-					select {
 
-					// Successful warm-start delivery
-					case event.Client.Send <- Message{
+					msg := Message{
 						Type: roomName,
 						Data: json.RawMessage(data),
-					}:
-						event.Client.Dropped = 0
+					}
 
-					// Warm-start drop
+					// Populate L1
+					h.l1.Set(key, msg)
+
+					select {
+					case event.Client.Send <- msg:
+						event.Client.Dropped = 0
 					default:
 						event.Client.Dropped++
 						if event.Client.Dropped > maxDroppedMessages {
@@ -97,6 +120,10 @@ func (h *Hub) Run() {
 
 		// ---------------- BROADCAST ----------------
 		case event := <-h.Broadcast:
+
+			// -------- L1 UPDATE --------
+			key := fmt.Sprintf("instrument:%s:last", event.Room)
+			h.l1.Set(key, event.Message)
 
 			room, ok := h.Rooms[event.Room]
 			if !ok {
