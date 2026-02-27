@@ -16,6 +16,10 @@ import (
 	"github.com/riyansh/chat-backend/internal/ws"
 )
 
+go func() {
+    log.Println(http.ListenAndServe("localhost:6060", nil))
+}()
+
 func main() {
 	// ------------------------------------------------
 	// 1. Instance identity

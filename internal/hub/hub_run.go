@@ -17,14 +17,17 @@ func (h *Hub) Run() {
 
 		// ---------------- REGISTER ----------------
 		case client := <-h.Register:
+			h.Metrics.ActiveClients.Add(1)
 			fmt.Println("Register client:", client.ID)
 
 		// ---------------- UNREGISTER ----------------
 		case client := <-h.Unregister:
+			h.Metrics.ActiveClients.Add(-1)
 			fmt.Println("Unregistering client:", client.ID)
 			for roomName := range client.Rooms {
 				if room, ok := h.Rooms[roomName]; ok {
 					delete(room.Clients, client)
+					h.Metrics.ActiveRooms.Add(-1)
 				}
 			}
 
@@ -45,6 +48,7 @@ func (h *Hub) Run() {
 					Clients: make(map[*Client]bool),
 				}
 				h.Rooms[roomName] = room
+				h.Metrics.ActiveRooms.Add(1)
 			}
 
 			room.Clients[event.Client] = true
@@ -117,9 +121,11 @@ func (h *Hub) Run() {
 				fmt.Println(event.Client.ID, "left", roomName)
 			}
 			delete(event.Client.Rooms, roomName)
+			h.Metrics.ActiveRooms.Add(-1)
 
 		// ---------------- BROADCAST ----------------
 		case event := <-h.Broadcast:
+			h.Metrics.EventsBroadcasted.Add(1)
 
 			// -------- L1 UPDATE --------
 			key := fmt.Sprintf("instrument:%s:last", event.Room)
@@ -129,7 +135,7 @@ func (h *Hub) Run() {
 			if !ok {
 				continue
 			}
-
+			h.Metrics.MessagesDelivered.Add(1)
 			for client := range room.Clients {
 				select {
 
@@ -139,6 +145,7 @@ func (h *Hub) Run() {
 
 				// ❌ Client too slow → count drop
 				default:
+					h.Metrics.MessagesDropped.Add(1)
 					client.Dropped++
 
 					if client.Dropped > maxDroppedMessages {

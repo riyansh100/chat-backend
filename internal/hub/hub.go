@@ -3,6 +3,7 @@ package hub
 import (
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/cache"
+	"github.com/riyansh/chat-backend/internal/metrics"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -22,5 +23,6 @@ type Hub struct {
 
 	redisCache chatredis.Cache
 
-	l1 *cache.L1Cache
+	l1      *cache.L1Cache
+	Metrics *metrics.HubMetrics
 }

@@ -10,6 +10,7 @@ type PriceUpdateEvent struct {
 	InstrumentID int
 	Price        float64
 	Timestamp    int64
+	IngestedAt   int64 `json:"ingested_at"`
 }
 
 // Order placement

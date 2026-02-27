@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"time"
 
@@ -27,6 +28,16 @@ func (c *Client) WritePump() {
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				return
+			}
+
+			// 🔥 Measure latency ONLY for price updates
+			if data, ok := msg.Data.(map[string]interface{}); ok {
+				if ts, exists := data["ingested_at"]; exists {
+					if ingestedAt, ok := ts.(int64); ok {
+						latency := time.Now().UnixNano() - ingestedAt
+						log.Printf("Latency (µs): %d", latency/1000)
+					}
+				}
 			}
 			if err := c.Conn.WriteJSON(msg); err != nil {
 				return
@@ -122,7 +133,7 @@ func (c *Client) ReadPump() {
 				switch ev := e.(type) {
 
 				case trading.PriceUpdateEvent:
-
+					ev.IngestedAt = time.Now().UnixNano()
 					// --- Phase 4: Redis KV warm-start write (production-safe) ---
 					if c.Hub.redisCache != nil {
 
