@@ -134,6 +134,7 @@ func (c *Client) ReadPump() {
 
 				case trading.PriceUpdateEvent:
 					ev.IngestedAt = time.Now().UnixNano()
+					c.Hub.Metrics.EventsIngested.Add(1)
 					// --- Phase 4: Redis KV warm-start write (production-safe) ---
 					if c.Hub.redisCache != nil {
 
