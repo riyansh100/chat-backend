@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"log"
 	"net/url"
 	"os"
@@ -45,7 +47,50 @@ func main() {
 			log.Println("read error:", err)
 			return
 		}
-		log.Printf("EVENT RECEIVED (%s): %+v\n", input, msg)
+		//log.Printf("EVENT RECEIVED (%s): %+v\n", input, msg)
+
+		msgType, _ := msg["type"].(string)
+
+if msgType == "sma_update" {
+
+	encoded, ok := msg["data"].(string)
+	if !ok {
+		return
+	}
+
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		log.Println("decode error:", err)
+		return
+	}
+
+	var sma struct {
+		InstrumentID int     `json:"instrument_id"`
+		Value        float64 `json:"value"`
+		Timestamp    int64   `json:"timestamp"`
+	}
+
+	err = json.Unmarshal(decoded, &sma)
+	if err != nil {
+		log.Println("json decode error:", err)
+		return
+	}
+
+	log.Printf("📊 SMA(%d) = %.2f\n", sma.InstrumentID, sma.Value)
+
+} else {
+
+	dataBytes, _ := json.Marshal(msg["data"])
+
+	var price struct {
+		Instrument string  `json:"instrument"`
+		Price      float64 `json:"price"`
+	}
+
+	json.Unmarshal(dataBytes, &price)
+
+	log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
+}
 	}
 }
 

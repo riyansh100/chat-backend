@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
+	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
@@ -170,6 +172,38 @@ func (h *Hub) Run() {
 					payload,
 				)
 			}
+
+			// ---------------- ANALYTICS LAYER ----------------
+
+instrumentID, err := strconv.Atoi(event.Room)
+if err != nil {
+    break
+}
+
+dataMap, ok := event.Message.Data.(map[string]interface{})
+if !ok {
+    break
+}
+
+priceVal, ok := dataMap["price"]
+if !ok {
+    break
+}
+
+priceFloat, ok := priceVal.(float64)
+if !ok {
+    break
+}
+
+select {
+case h.smaEngine.Input() <- analytics.PriceUpdateEvent{
+    InstrumentID: instrumentID,
+    Price:        priceFloat,
+    Timestamp:    time.Now().UnixNano(),
+}:
+default:
+    // analytics overloaded — safe drop
+}
 		}
 	}
 }

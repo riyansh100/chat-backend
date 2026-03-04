@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/hub"
 	"github.com/riyansh/chat-backend/internal/ws"
 )
@@ -46,6 +47,10 @@ func main() {
 
 	// Start Hub loop
 	go h.Run()
+
+	// ----------------------analytics---------------------------
+	smaEngine := analytics.NewEngine(20) // 20-period SMA
+	go smaEngine.Run()
 
 	// ------------------------------------------------
 	// 5. WebSocket handlers
