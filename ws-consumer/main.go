@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/url"
@@ -51,46 +50,63 @@ func main() {
 
 		msgType, _ := msg["type"].(string)
 
-if msgType == "sma_update" {
+		if msgType == "sma_update" {
 
-	encoded, ok := msg["data"].(string)
-	if !ok {
-		return
-	}
+			dataBytes, _ := json.Marshal(msg["data"])
 
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		log.Println("decode error:", err)
-		return
-	}
+			var sma struct {
+				InstrumentID int     `json:"instrument_id"`
+				Value        float64 `json:"value"`
+				Timestamp    int64   `json:"timestamp"`
+			}
 
-	var sma struct {
-		InstrumentID int     `json:"instrument_id"`
-		Value        float64 `json:"value"`
-		Timestamp    int64   `json:"timestamp"`
-	}
+			if err := json.Unmarshal(dataBytes, &sma); err != nil {
+				log.Println("sma_update decode error:", err)
+				continue
+			}
 
-	err = json.Unmarshal(decoded, &sma)
-	if err != nil {
-		log.Println("json decode error:", err)
-		return
-	}
+			log.Printf("📊 SMA(%d) = %.2f\n", sma.InstrumentID, sma.Value)
 
-	log.Printf("📊 SMA(%d) = %.2f\n", sma.InstrumentID, sma.Value)
+		} else if msgType == "sma_history" {
 
-} else {
+			dataBytes, _ := json.Marshal(msg["data"])
 
-	dataBytes, _ := json.Marshal(msg["data"])
+			var history struct {
+				InstrumentID int `json:"instrument_id"`
+				Points       []struct {
+					Ts    int64  `json:"ts"`
+					Value string `json:"value"`
+				} `json:"points"`
+			}
 
-	var price struct {
-		Instrument string  `json:"instrument"`
-		Price      float64 `json:"price"`
-	}
+			if err := json.Unmarshal(dataBytes, &history); err != nil {
+				log.Println("sma_history decode error:", err)
+				continue
+			}
 
-	json.Unmarshal(dataBytes, &price)
+			log.Printf("📈 SMA HISTORY instrument=%d points=%d (oldest → newest)\n",
+				history.InstrumentID, len(history.Points))
 
-	log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
-}
+			if len(history.Points) > 0 {
+				first := history.Points[0]
+				last := history.Points[len(history.Points)-1]
+				log.Printf("   first: ts=%d value=%s\n", first.Ts, first.Value)
+				log.Printf("   last:  ts=%d value=%s\n", last.Ts, last.Value)
+			}
+
+		} else {
+
+			dataBytes, _ := json.Marshal(msg["data"])
+
+			var price struct {
+				Instrument string  `json:"instrument"`
+				Price      float64 `json:"price"`
+			}
+
+			json.Unmarshal(dataBytes, &price)
+
+			log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
+		}
 	}
 }
 

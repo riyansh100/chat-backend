@@ -58,6 +58,48 @@ func (h *Hub) Run() {
 
 			fmt.Println(event.Client.ID, "joined", roomName)
 
+			// ---------------- SMA HISTORY ----------------
+			// Must be before L1/Redis warm-start (those use continue/return)
+			if h.smaStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, id int) {
+						entries, err := h.smaStore.GetLast(context.Background(), id, 1800)
+						fmt.Printf("[SMA HISTORY] instrument=%d entries=%d err=%v\n", id, len(entries), err)
+						if err != nil || len(entries) == 0 {
+							return
+						}
+
+						points := make([]map[string]interface{}, 0, len(entries))
+						for _, z := range entries {
+							points = append(points, map[string]interface{}{
+								"ts":    int64(z.Score),
+								"value": z.Member,
+							})
+						}
+
+						msg := Message{
+							Type: "sma_history",
+							Data: map[string]interface{}{
+								"instrument_id": id,
+								"window":        20,
+								"resolution":    "1s",
+								"points":        points,
+							},
+						}
+
+						select {
+						case client.Send <- msg:
+							fmt.Printf("[SMA HISTORY] sent to client %s\n", client.ID)
+						default:
+							fmt.Printf("[SMA HISTORY] client send channel full — dropped\n")
+						}
+					}(event.Client, instrumentID)
+				}
+			} else {
+				fmt.Println("[SMA HISTORY] smaStore is nil — skipping")
+			}
+
 			// ---------------- L1 CACHE CHECK ----------------
 			key := fmt.Sprintf("instrument:%s:last", roomName)
 
@@ -175,35 +217,35 @@ func (h *Hub) Run() {
 
 			// ---------------- ANALYTICS LAYER ----------------
 
-instrumentID, err := strconv.Atoi(event.Room)
-if err != nil {
-    break
-}
+			instrumentID, err := strconv.Atoi(event.Room)
+			if err != nil {
+				break
+			}
 
-dataMap, ok := event.Message.Data.(map[string]interface{})
-if !ok {
-    break
-}
+			dataMap, ok := event.Message.Data.(map[string]interface{})
+			if !ok {
+				break
+			}
 
-priceVal, ok := dataMap["price"]
-if !ok {
-    break
-}
+			priceVal, ok := dataMap["price"]
+			if !ok {
+				break
+			}
 
-priceFloat, ok := priceVal.(float64)
-if !ok {
-    break
-}
+			priceFloat, ok := priceVal.(float64)
+			if !ok {
+				break
+			}
 
-select {
-case h.smaEngine.Input() <- analytics.PriceUpdateEvent{
-    InstrumentID: instrumentID,
-    Price:        priceFloat,
-    Timestamp:    time.Now().UnixNano(),
-}:
-default:
-    // analytics overloaded — safe drop
-}
+			select {
+			case h.smaEngine.Input() <- analytics.PriceUpdateEvent{
+				InstrumentID: instrumentID,
+				Price:        priceFloat,
+				Timestamp:    time.Now().UnixNano(),
+			}:
+			default:
+				// analytics overloaded — safe drop
+			}
 		}
 	}
 }

@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"encoding/json"
 	"strconv"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -31,7 +30,9 @@ type Hub struct {
 	Metrics *metrics.HubMetrics
 
 	smaEngine *analytics.Engine
+	smaStore  *analytics.SMAStore
 }
+
 func (h *Hub) broadcastSMA(sma analytics.SMAUpdateEvent) {
 
 	roomName := strconv.Itoa(sma.InstrumentID)
@@ -42,17 +43,14 @@ func (h *Hub) broadcastSMA(sma analytics.SMAUpdateEvent) {
 	}
 
 	payload := map[string]interface{}{
-		"type":          "sma_update",
 		"instrument_id": sma.InstrumentID,
 		"value":         sma.Value,
 		"timestamp":     sma.Timestamp,
 	}
 
-	data, _ := json.Marshal(payload)
-
 	msg := Message{
 		Type: "sma_update",
-		Data: data,
+		Data: payload,
 	}
 
 	for client := range room.Clients {

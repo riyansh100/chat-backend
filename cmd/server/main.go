@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/hub"
 	"github.com/riyansh/chat-backend/internal/ws"
 )
@@ -28,7 +27,7 @@ func main() {
 	// 2. Redis client (CREATE FIRST)
 	// ------------------------------------------------
 	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: "localhost:6380",
 	})
 
 	// ------------------------------------------------
@@ -39,18 +38,13 @@ func main() {
 	// ------------------------------------------------
 	// 4. Hub
 	// ------------------------------------------------
-	h := hub.NewHub(instanceID, redisCache)
-	h.RedisClient = rdb
+	h := hub.NewHub(instanceID, redisCache, rdb)
 
 	ctx := context.Background()
 	hub.StartRedisSubscriber(ctx, rdb, h)
 
 	// Start Hub loop
 	go h.Run()
-
-	// ----------------------analytics---------------------------
-	smaEngine := analytics.NewEngine(20) // 20-period SMA
-	go smaEngine.Run()
 
 	// ------------------------------------------------
 	// 5. WebSocket handlers
