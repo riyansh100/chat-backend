@@ -38,7 +38,6 @@ func (h *Hub) Run() {
 
 			roomName := event.Room
 
-			// Accept symbol OR numeric ID
 			if id, ok := trading.SymbolToID[roomName]; ok {
 				roomName = strconv.Itoa(id)
 			}
@@ -59,45 +58,47 @@ func (h *Hub) Run() {
 			fmt.Println(event.Client.ID, "joined", roomName)
 
 			// ---------------- SMA HISTORY ----------------
-			// Must be before L1/Redis warm-start (those use continue/return)
 			if h.smaStore != nil {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
-					go func(client *Client, id int) {
-						entries, err := h.smaStore.GetLast(context.Background(), id, 1800)
-						fmt.Printf("[SMA HISTORY] instrument=%d entries=%d err=%v\n", id, len(entries), err)
-						if err != nil || len(entries) == 0 {
-							return
-						}
+					go func(client *Client, store *analytics.SMAStore, id int) {
+						for _, res := range []struct {
+							resolution string
+							n          int
+						}{
+							{"1s", 1800},
+							{"1m", 60},
+						} {
+							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
+							if err != nil || len(entries) == 0 {
+								continue
+							}
 
-						points := make([]map[string]interface{}, 0, len(entries))
-						for _, z := range entries {
-							points = append(points, map[string]interface{}{
-								"ts":    int64(z.Score),
-								"value": z.Member,
-							})
-						}
+							points := make([]map[string]interface{}, 0, len(entries))
+							for _, z := range entries {
+								points = append(points, map[string]interface{}{
+									"ts":    int64(z.Score),
+									"value": z.Member,
+								})
+							}
 
-						msg := Message{
-							Type: "sma_history",
-							Data: map[string]interface{}{
-								"instrument_id": id,
-								"window":        20,
-								"resolution":    "1s",
-								"points":        points,
-							},
-						}
+							msg := Message{
+								Type: "sma_history",
+								Data: map[string]interface{}{
+									"instrument_id": id,
+									"window":        20,
+									"resolution":    res.resolution,
+									"points":        points,
+								},
+							}
 
-						select {
-						case client.Send <- msg:
-							fmt.Printf("[SMA HISTORY] sent to client %s\n", client.ID)
-						default:
-							fmt.Printf("[SMA HISTORY] client send channel full — dropped\n")
+							select {
+							case client.Send <- msg:
+							default:
+							}
 						}
-					}(event.Client, instrumentID)
+					}(event.Client, h.smaStore, instrumentID)
 				}
-			} else {
-				fmt.Println("[SMA HISTORY] smaStore is nil — skipping")
 			}
 
 			// ---------------- L1 CACHE CHECK ----------------
@@ -115,9 +116,8 @@ func (h *Hub) Run() {
 							fmt.Println("Disconnecting slow client:", event.Client.ID, "drops:", event.Client.Dropped)
 							h.Unregister <- event.Client
 						}
-
 					}
-					continue // Skip Redis if L1 hit
+					continue
 				}
 			}
 
@@ -129,13 +129,11 @@ func (h *Hub) Run() {
 				)
 
 				if err == nil {
-
 					msg := Message{
 						Type: roomName,
 						Data: json.RawMessage(data),
 					}
 
-					// Populate L1
 					h.l1.Set(key, msg)
 
 					select {
@@ -171,27 +169,31 @@ func (h *Hub) Run() {
 		case event := <-h.Broadcast:
 			h.Metrics.EventsBroadcasted.Add(1)
 
-			// -------- L1 UPDATE --------
 			key := fmt.Sprintf("instrument:%s:last", event.Room)
 			h.l1.Set(key, event.Message)
 
 			room, ok := h.Rooms[event.Room]
 			if !ok {
+				if event.Message.Type == "sma_update" {
+					fmt.Printf("[SMA BROADCAST] room %s not found\n", event.Room)
+				}
 				continue
 			}
+
 			h.Metrics.MessagesDelivered.Add(1)
 			for client := range room.Clients {
 				select {
-
-				// ✅ Successful delivery → reset drop counter
 				case client.Send <- event.Message:
 					client.Dropped = 0
-
-				// ❌ Client too slow → count drop
+					//if event.Message.Type == "sma_update" {
+					//	fmt.Printf("[SMA BROADCAST] delivered room=%s\n", event.Room)
+					//}
 				default:
 					h.Metrics.MessagesDropped.Add(1)
 					client.Dropped++
-
+					if event.Message.Type == "sma_update" {
+						fmt.Printf("[SMA BROADCAST] DROPPED room=%s drops=%d\n", event.Room, client.Dropped)
+					}
 					if client.Dropped > maxDroppedMessages {
 						fmt.Println("Disconnecting slow client:", client.ID, "drops:", client.Dropped)
 						h.Unregister <- client
@@ -199,7 +201,7 @@ func (h *Hub) Run() {
 				}
 			}
 
-			// Redis bus publish — ONLY for locally-originated events
+			// Redis pub/sub — only locally-originated events
 			if event.Origin == h.InstanceID {
 				rm := RedisMessage{
 					Room:   event.Room,
@@ -216,7 +218,6 @@ func (h *Hub) Run() {
 			}
 
 			// ---------------- ANALYTICS LAYER ----------------
-
 			instrumentID, err := strconv.Atoi(event.Room)
 			if err != nil {
 				break
@@ -244,7 +245,6 @@ func (h *Hub) Run() {
 				Timestamp:    time.Now().UnixNano(),
 			}:
 			default:
-				// analytics overloaded — safe drop
 			}
 		}
 	}

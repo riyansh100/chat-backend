@@ -10,14 +10,10 @@ import (
 )
 
 const (
-	smaKeyPrefix = "sma:1s:" // sma:1s:{instrumentID}
-	maxEntries   = 3600      // keep last 60 minutes (1 entry/sec × 3600s)
+	maxEntries1s = 3600 // 60 minutes of 1s data
+	maxEntries1m = 1440 // 24 hours of 1m data
 )
 
-// SMAStore writes bucketed SMA values into Redis Sorted Sets.
-// Key:   sma:1s:{instrumentID}
-// Score: unix timestamp (seconds)
-// Value: SMA value as string
 type SMAStore struct {
 	rdb *redis.Client
 }
@@ -26,18 +22,31 @@ func NewSMAStore(rdb *redis.Client) *SMAStore {
 	return &SMAStore{rdb: rdb}
 }
 
-func (s *SMAStore) key(instrumentID int) string {
-	return fmt.Sprintf("%s%d", smaKeyPrefix, instrumentID)
+func key1s(instrumentID int) string {
+	return fmt.Sprintf("sma:1s:%d", instrumentID)
 }
 
-// Write stores one SMA value for an instrument at the current timestamp,
-// then trims the sorted set to the last maxEntries entries.
-func (s *SMAStore) Write(ctx context.Context, event SMAUpdateEvent) error {
-	key := s.key(event.InstrumentID)
-	ts := time.Now().Unix() // score = unix seconds
+func key1m(instrumentID int) string {
+	return fmt.Sprintf("sma:1m:%d", instrumentID)
+}
 
-	// Add to sorted set: score=timestamp, member=sma_value
-	err := s.rdb.ZAdd(ctx, key, redis.Z{
+// Write stores a bucketed SMA value under the correct resolution key.
+func (s *SMAStore) Write(ctx context.Context, event SMAUpdateEvent) error {
+	var k string
+	var maxEntries int64
+
+	switch event.Resolution {
+	case "1m":
+		k = key1m(event.InstrumentID)
+		maxEntries = maxEntries1m
+	default: // "1s"
+		k = key1s(event.InstrumentID)
+		maxEntries = maxEntries1s
+	}
+
+	ts := time.Now().Unix()
+
+	err := s.rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
 		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
 	}).Err()
@@ -45,24 +54,31 @@ func (s *SMAStore) Write(ctx context.Context, event SMAUpdateEvent) error {
 		return err
 	}
 
-	// Trim: keep only last maxEntries (removes oldest by rank)
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxEntries-1)
-
+	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
 
-// GetRange fetches SMA values for an instrument between two unix timestamps.
-// Returns slice of (timestamp, value) pairs in ascending order.
-func (s *SMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64) ([]redis.Z, error) {
-	key := s.key(instrumentID)
-	return s.rdb.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+// GetLast fetches the most recent n SMA values for a given resolution.
+func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolution string) ([]redis.Z, error) {
+	var k string
+	if resolution == "1m" {
+		k = key1m(instrumentID)
+	} else {
+		k = key1s(instrumentID)
+	}
+	return s.rdb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+}
+
+// GetRange fetches SMA values between two unix timestamps for a given resolution.
+func (s *SMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
+	var k string
+	if resolution == "1m" {
+		k = key1m(instrumentID)
+	} else {
+		k = key1s(instrumentID)
+	}
+	return s.rdb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
-}
-
-// GetLast fetches the most recent N SMA values for an instrument.
-func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int) ([]redis.Z, error) {
-	key := s.key(instrumentID)
-	return s.rdb.ZRangeWithScores(ctx, key, int64(-n), -1).Result()
 }

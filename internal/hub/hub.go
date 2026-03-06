@@ -1,8 +1,6 @@
 package hub
 
 import (
-	"strconv"
-
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/cache"
@@ -31,37 +29,4 @@ type Hub struct {
 
 	smaEngine *analytics.Engine
 	smaStore  *analytics.SMAStore
-}
-
-func (h *Hub) broadcastSMA(sma analytics.SMAUpdateEvent) {
-
-	roomName := strconv.Itoa(sma.InstrumentID)
-
-	room, ok := h.Rooms[roomName]
-	if !ok {
-		return
-	}
-
-	payload := map[string]interface{}{
-		"instrument_id": sma.InstrumentID,
-		"value":         sma.Value,
-		"timestamp":     sma.Timestamp,
-	}
-
-	msg := Message{
-		Type: "sma_update",
-		Data: payload,
-	}
-
-	for client := range room.Clients {
-		select {
-		case client.Send <- msg:
-			client.Dropped = 0
-		default:
-			client.Dropped++
-			if client.Dropped > maxDroppedMessages {
-				h.Unregister <- client
-			}
-		}
-	}
 }

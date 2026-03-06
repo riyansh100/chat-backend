@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -15,7 +16,6 @@ func main() {
 		log.Fatal("Usage: go run main.go [instrument_id | id1,id2,...]")
 	}
 
-	// Accept numeric IDs (example: 101 or 101,102)
 	input := os.Args[1]
 	rooms := strings.Split(input, ",")
 
@@ -32,21 +32,21 @@ func main() {
 	}
 	defer conn.Close()
 
-	// Join all requested numeric rooms
 	for _, room := range rooms {
 		room = strings.TrimSpace(room)
 		join(conn, room)
 		log.Println("Subscribed to instrument ID:", room)
 	}
 
-	// Read events continuously
+	// price bucket: track last printed time per instrument
+	lastPrinted := make(map[string]time.Time)
+
 	for {
 		var msg map[string]interface{}
 		if err := conn.ReadJSON(&msg); err != nil {
 			log.Println("read error:", err)
 			return
 		}
-		//log.Printf("EVENT RECEIVED (%s): %+v\n", input, msg)
 
 		msgType, _ := msg["type"].(string)
 
@@ -58,6 +58,7 @@ func main() {
 				InstrumentID int     `json:"instrument_id"`
 				Value        float64 `json:"value"`
 				Timestamp    int64   `json:"timestamp"`
+				Resolution   string  `json:"resolution"`
 			}
 
 			if err := json.Unmarshal(dataBytes, &sma); err != nil {
@@ -65,14 +66,15 @@ func main() {
 				continue
 			}
 
-			log.Printf("📊 SMA(%d) = %.2f\n", sma.InstrumentID, sma.Value)
+			log.Printf("📊 SMA [%s] (%d) = %.2f\n", sma.Resolution, sma.InstrumentID, sma.Value)
 
 		} else if msgType == "sma_history" {
 
 			dataBytes, _ := json.Marshal(msg["data"])
 
 			var history struct {
-				InstrumentID int `json:"instrument_id"`
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
 				Points       []struct {
 					Ts    int64  `json:"ts"`
 					Value string `json:"value"`
@@ -84,8 +86,8 @@ func main() {
 				continue
 			}
 
-			log.Printf("📈 SMA HISTORY instrument=%d points=%d (oldest → newest)\n",
-				history.InstrumentID, len(history.Points))
+			log.Printf("📈 SMA HISTORY [%s] instrument=%d points=%d\n",
+				history.Resolution, history.InstrumentID, len(history.Points))
 
 			if len(history.Points) > 0 {
 				first := history.Points[0]
@@ -105,15 +107,18 @@ func main() {
 
 			json.Unmarshal(dataBytes, &price)
 
-			log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
+			// only print once per second per instrument
+			if time.Since(lastPrinted[price.Instrument]) >= time.Second {
+				log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
+				lastPrinted[price.Instrument] = time.Now()
+			}
 		}
 	}
 }
-
 func join(conn *websocket.Conn, room string) {
 	err := conn.WriteJSON(map[string]string{
 		"type": "join",
-		"room": room, // send numeric ID directly
+		"room": room,
 	})
 	if err != nil {
 		log.Fatal("join error:", err)
