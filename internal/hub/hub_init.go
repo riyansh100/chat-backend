@@ -3,10 +3,10 @@ package hub
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strconv"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/cache"
@@ -14,7 +14,7 @@ import (
 	"github.com/riyansh/chat-backend/internal/redis"
 )
 
-func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub {
+func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool *pgxpool.Pool) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -30,6 +30,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
+		pgPool:      pool,
 
 		Metrics: m,
 
@@ -40,6 +41,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub
 		Broadcast:  make(chan BroadcastEvent),
 	}
 
+	// SMA engine
 	sma := analytics.NewEngine(20)
 	go sma.Run()
 	hub.smaEngine = sma
@@ -50,9 +52,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub
 		hub.smaStore = smaStore
 	}
 
-	// smaToHub routes SMA events through the Hub's Broadcast channel.
-	// This is required because Hub owns h.Rooms — reading it directly
-	// from another goroutine is a data race.
 	smaToHub := func(smaEvent analytics.SMAUpdateEvent) {
 		roomName := strconv.Itoa(smaEvent.InstrumentID)
 		data, _ := json.Marshal(map[string]interface{}{
@@ -71,7 +70,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub
 		}
 	}
 
-	// 1s: broadcast + persist
 	go func() {
 		for smaEvent := range hub.smaEngine.Output() {
 			smaToHub(smaEvent)
@@ -83,14 +81,53 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client) *Hub
 		}
 	}()
 
-	// 1m: broadcast + persist
 	go func() {
 		for smaEvent := range hub.smaEngine.OutputMin() {
-			fmt.Printf("[1m] smaToHub called instrument=%d value=%.4f\n", smaEvent.InstrumentID, smaEvent.Value)
 			smaToHub(smaEvent)
 			if smaStore != nil {
 				if err := smaStore.Write(context.Background(), smaEvent); err != nil {
 					log.Printf("SMA 1m write error (instrument %d): %v", smaEvent.InstrumentID, err)
+				}
+			}
+		}
+	}()
+
+	// OHLC engine
+	ohlc := analytics.NewOHLCEngine()
+	go ohlc.Run()
+	hub.ohlcEngine = ohlc
+
+	var ohlcStore *analytics.OHLCStore
+	if hub.RedisClient != nil && hub.pgPool != nil {
+		ohlcStore = analytics.NewOHLCStore(hub.RedisClient, hub.pgPool)
+		hub.ohlcStore = ohlcStore
+	}
+
+	// OHLC: broadcast to live clients + persist to Redis and Postgres
+	go func() {
+		for ohlcEvent := range hub.ohlcEngine.Output() {
+			roomName := strconv.Itoa(ohlcEvent.InstrumentID)
+			data, _ := json.Marshal(map[string]interface{}{
+				"instrument_id": ohlcEvent.InstrumentID,
+				"resolution":    ohlcEvent.Resolution,
+				"open":          ohlcEvent.Open,
+				"high":          ohlcEvent.High,
+				"low":           ohlcEvent.Low,
+				"close":         ohlcEvent.Close,
+				"timestamp":     ohlcEvent.Timestamp,
+			})
+			hub.Broadcast <- BroadcastEvent{
+				Room:   roomName,
+				Origin: hub.InstanceID,
+				Message: Message{
+					Type: "ohlc_update",
+					Data: json.RawMessage(data),
+				},
+			}
+
+			if ohlcStore != nil {
+				if err := ohlcStore.Write(context.Background(), ohlcEvent); err != nil {
+					log.Printf("OHLC write error (instrument %d): %v", ohlcEvent.InstrumentID, err)
 				}
 			}
 		}

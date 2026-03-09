@@ -246,6 +246,16 @@ func (h *Hub) Run() {
 			}:
 			default:
 			}
+
+			// feed OHLC engine
+			select {
+			case h.ohlcEngine.Input() <- analytics.PriceUpdateEvent{
+				InstrumentID: instrumentID,
+				Price:        priceFloat,
+				Timestamp:    time.Now().UnixNano(),
+			}:
+			default:
+			}
 		}
 	}
 }

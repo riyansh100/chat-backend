@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"github.com/jackc/pgx/v5/pgxpool"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/cache"
@@ -11,6 +12,7 @@ import (
 type Hub struct {
 	Rooms       map[string]*Room
 	RedisClient *goredis.Client
+	pgPool      *pgxpool.Pool
 
 	Register   chan *Client
 	Unregister chan *Client
@@ -27,6 +29,8 @@ type Hub struct {
 	l1      *cache.L1Cache
 	Metrics *metrics.HubMetrics
 
-	smaEngine *analytics.Engine
-	smaStore  *analytics.SMAStore
+	smaEngine  *analytics.Engine
+	smaStore   *analytics.SMAStore
+	ohlcEngine *analytics.OHLCEngine
+	ohlcStore  *analytics.OHLCStore
 }

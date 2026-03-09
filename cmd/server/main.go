@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-
 	"github.com/riyansh/chat-backend/internal/hub"
 	"github.com/riyansh/chat-backend/internal/ws"
 )
@@ -34,6 +33,15 @@ func main() {
 	// 3. Redis in-memory cache (KV)
 	// ------------------------------------------------
 	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
+
+	// n. Postgres (TimescaleDB)
+	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
+	pool, err := pgxpool.New(context.Background(), pgConnStr)
+	if err != nil {
+		log.Fatal("postgres connect failed:", err)
+	}
+	defer pool.Close()
+	log.Println("Postgres connected")
 
 	// ------------------------------------------------
 	// 4. Hub
