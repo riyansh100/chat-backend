@@ -1,7 +1,6 @@
 package analytics
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -148,7 +147,6 @@ func (e *Engine) flushSeconds() {
 // using the last 1s SMA value seen within that minute.
 func (e *Engine) flushMinutes() {
 	e.mu.Lock()
-	fmt.Printf("[1m FLUSH] checking %d minBuckets\n", len(e.minBuckets))
 	defer e.mu.Unlock()
 
 	ts := time.Now().UnixNano()

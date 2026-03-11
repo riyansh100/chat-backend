@@ -174,9 +174,6 @@ func (h *Hub) Run() {
 
 			room, ok := h.Rooms[event.Room]
 			if !ok {
-				if event.Message.Type == "sma_update" {
-					fmt.Printf("[SMA BROADCAST] room %s not found\n", event.Room)
-				}
 				continue
 			}
 
@@ -185,15 +182,9 @@ func (h *Hub) Run() {
 				select {
 				case client.Send <- event.Message:
 					client.Dropped = 0
-					//if event.Message.Type == "sma_update" {
-					//	fmt.Printf("[SMA BROADCAST] delivered room=%s\n", event.Room)
-					//}
 				default:
 					h.Metrics.MessagesDropped.Add(1)
 					client.Dropped++
-					if event.Message.Type == "sma_update" {
-						fmt.Printf("[SMA BROADCAST] DROPPED room=%s drops=%d\n", event.Room, client.Dropped)
-					}
 					if client.Dropped > maxDroppedMessages {
 						fmt.Println("Disconnecting slow client:", client.ID, "drops:", client.Dropped)
 						h.Unregister <- client
