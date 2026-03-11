@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/riyansh/chat-backend/internal/background"
 	"github.com/riyansh/chat-backend/internal/hub"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 	"github.com/riyansh/chat-backend/internal/ws"
@@ -45,7 +46,18 @@ func main() {
 	hub.StartRedisSubscriber(ctx, rdb, h)
 	go h.Run()
 
-	// 6. WebSocket handlers
+	// 6. Background analytics worker
+	// Feeds SMA + OHLC engines directly — no consumer needs to be connected.
+	// FEED_SOURCE=binance (default) or FEED_SOURCE=mock
+	feedSource := os.Getenv("FEED_SOURCE")
+	if feedSource == "" {
+		feedSource = "binance"
+	}
+	bgWorker := background.NewWorker(feedSource, h.SMAEngine(), h.OHLCEngine())
+	go bgWorker.Start(ctx)
+	log.Printf("Background analytics worker started (source=%s)", feedSource)
+
+	// 7. WebSocket handlers
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, w, r)
 	})

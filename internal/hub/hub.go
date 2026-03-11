@@ -34,3 +34,13 @@ type Hub struct {
 	ohlcEngine *analytics.OHLCEngine
 	ohlcStore  *analytics.OHLCStore
 }
+
+// SMAEngine returns the Hub's SMA engine for direct feeding by the background worker.
+func (h *Hub) SMAEngine() *analytics.Engine {
+	return h.smaEngine
+}
+
+// OHLCEngine returns the Hub's OHLC engine for direct feeding by the background worker.
+func (h *Hub) OHLCEngine() *analytics.OHLCEngine {
+	return h.ohlcEngine
+}
