@@ -19,7 +19,7 @@ type SMAUpdateEvent struct {
 	Resolution   string // "1s" or "1m"
 }
 
-// bucket holds the latest SMA value computed within a time window lol
+// bucket holds the latest SMA value computed within a time window for an instrument. This is used to emit one SMA per instrument per window.
 type bucket struct {
 	value    float64
 	hasValue bool
