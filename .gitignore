@@ -3,6 +3,9 @@ bin/
 *.exe
 *.out
 
+# Redis snapshot
+dump.rdb
+
 # Go workspace
 go.work
 go.work.sum
