@@ -96,6 +96,57 @@ func main() {
 				log.Printf("   last:  ts=%d value=%s\n", last.Ts, last.Value)
 			}
 
+		} else if msgType == "ohlc_update" {
+
+			dataBytes, _ := json.Marshal(msg["data"])
+
+			var ohlc struct {
+				InstrumentID int     `json:"instrument_id"`
+				Resolution   string  `json:"resolution"`
+				Open         float64 `json:"open"`
+				High         float64 `json:"high"`
+				Low          float64 `json:"low"`
+				Close        float64 `json:"close"`
+				Timestamp    int64   `json:"timestamp"`
+			}
+
+			if err := json.Unmarshal(dataBytes, &ohlc); err != nil {
+				log.Println("ohlc_update decode error:", err)
+				continue
+			}
+
+			log.Printf("🕯️  OHLC [%s] (%d) O=%.2f H=%.2f L=%.2f C=%.2f\n",
+				ohlc.Resolution, ohlc.InstrumentID,
+				ohlc.Open, ohlc.High, ohlc.Low, ohlc.Close)
+
+		} else if msgType == "ohlc_history" {
+
+			dataBytes, _ := json.Marshal(msg["data"])
+
+			var history struct {
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
+				Candles      []struct {
+					Ts     int64  `json:"ts"`
+					Candle string `json:"candle"`
+				} `json:"candles"`
+			}
+
+			if err := json.Unmarshal(dataBytes, &history); err != nil {
+				log.Println("ohlc_history decode error:", err)
+				continue
+			}
+
+			log.Printf("🕯️  OHLC HISTORY [%s] instrument=%d candles=%d\n",
+				history.Resolution, history.InstrumentID, len(history.Candles))
+
+			if len(history.Candles) > 0 {
+				first := history.Candles[0]
+				last := history.Candles[len(history.Candles)-1]
+				log.Printf("   first: ts=%d\n", first.Ts)
+				log.Printf("   last:  ts=%d\n", last.Ts)
+			}
+
 		} else {
 
 			dataBytes, _ := json.Marshal(msg["data"])

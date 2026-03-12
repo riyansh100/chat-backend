@@ -101,6 +101,41 @@ func (h *Hub) Run() {
 				}
 			}
 
+			// ---------------- OHLC HISTORY ----------------
+			if h.ohlcStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, store *analytics.OHLCStore, id int) {
+						entries, err := store.GetLast(context.Background(), id, 60)
+						if err != nil || len(entries) == 0 {
+							return
+						}
+
+						candles := make([]map[string]interface{}, 0, len(entries))
+						for _, z := range entries {
+							candles = append(candles, map[string]interface{}{
+								"ts":     int64(z.Score),
+								"candle": z.Member,
+							})
+						}
+
+						msg := Message{
+							Type: "ohlc_history",
+							Data: map[string]interface{}{
+								"instrument_id": id,
+								"resolution":    "1m",
+								"candles":       candles,
+							},
+						}
+
+						select {
+						case client.Send <- msg:
+						default:
+						}
+					}(event.Client, h.ohlcStore, instrumentID)
+				}
+			}
+
 			// ---------------- L1 CACHE CHECK ----------------
 			key := fmt.Sprintf("instrument:%s:last", roomName)
 
