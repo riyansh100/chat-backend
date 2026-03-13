@@ -163,10 +163,11 @@ func (c *Client) ReadPump() {
 						Message: Message{
 							Room: roomID,
 							Data: map[string]interface{}{
-								"type":       "price_update",
-								"price":      ev.Price,
-								"ts":         ev.Timestamp,
-								"instrument": ev.Instrument, // keep string
+								"type":        "price_update",
+								"price":       ev.Price,
+								"ts":          ev.Timestamp,
+								"instrument":  ev.Instrument,
+								"ingested_at": ev.IngestedAt,
 							},
 						},
 					}
