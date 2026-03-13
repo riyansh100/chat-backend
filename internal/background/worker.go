@@ -13,7 +13,9 @@ import (
 
 const binanceEndpoint = "wss://stream.binance.com:9443/stream?streams=" +
 	"btcusdt@trade/ethusdt@trade/bnbusdt@trade/xrpusdt@trade/solusdt@trade/" +
-	"adausdt@trade/dogeusdt@trade/maticusdt@trade/ltcusdt@trade/dotusdt@trade"
+	"adausdt@trade/dogeusdt@trade/maticusdt@trade/ltcusdt@trade/dotusdt@trade/" +
+	"avaxusdt@trade/linkusdt@trade/uniusdt@trade/atomusdt@trade/trxusdt@trade/" +
+	"etcusdt@trade/filusdt@trade/icpusdt@trade/aptusdt@trade/arbusdt@trade"
 
 // Worker feeds price ticks directly into the Hub's analytics engines,
 // independently of any WebSocket consumer being connected.
@@ -87,7 +89,9 @@ func (w *Worker) runMock(ctx context.Context) {
 	basePrices := map[int]float64{
 		101: 60000, 102: 3000, 103: 300, 104: 0.5,
 		105: 150, 106: 0.4, 107: 0.08, 108: 0.7,
-		109: 80, 110: 7,
+		109: 80, 110: 7, 111: 35, 112: 15,
+		113: 8, 114: 9, 115: 0.12, 116: 25,
+		117: 5, 118: 10, 119: 12, 120: 1.5,
 	}
 
 	for {
