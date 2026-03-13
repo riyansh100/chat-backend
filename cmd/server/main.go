@@ -13,6 +13,7 @@ import (
 
 	"github.com/riyansh/chat-backend/internal/background"
 	"github.com/riyansh/chat-backend/internal/hub"
+	"github.com/riyansh/chat-backend/internal/metrics"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 	"github.com/riyansh/chat-backend/internal/ws"
 )
@@ -63,7 +64,14 @@ func main() {
 	})
 	http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
 
-	// 7. Server
+	// 8. Metrics endpoint — hit localhost:8080/metrics to see live stats
+	http.HandleFunc("/metrics", metrics.Handler(
+		h.Metrics,
+		func() int { return h.SMAEngine().InputLen() },
+		func() int { return h.OHLCEngine().InputLen() },
+	))
+
+	// 9. Server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
