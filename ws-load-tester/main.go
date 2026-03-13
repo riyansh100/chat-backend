@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,45 @@ import (
 var (
 	totalReceived atomic.Int64
 	totalDropped  atomic.Int64
+
+	latencyMu      sync.Mutex
+	latencySamples []int64 // microseconds, reset every 5s
 )
+
+func recordLatency(us int64) {
+	latencyMu.Lock()
+	latencySamples = append(latencySamples, us)
+	latencyMu.Unlock()
+}
+
+func flushLatency() (min, avg, max float64, count int) {
+	latencyMu.Lock()
+	samples := latencySamples
+	latencySamples = nil
+	latencyMu.Unlock()
+
+	count = len(samples)
+	if count == 0 {
+		return 0, 0, 0, 0
+	}
+
+	var sum int64
+	minVal := int64(math.MaxInt64)
+	maxVal := int64(0)
+	for _, s := range samples {
+		sum += s
+		if s < minVal {
+			minVal = s
+		}
+		if s > maxVal {
+			maxVal = s
+		}
+	}
+	return float64(minVal) / 1000.0,
+		float64(sum) / float64(count) / 1000.0,
+		float64(maxVal) / 1000.0,
+		count
+}
 
 func main() {
 	clients := flag.Int("clients", 10, "number of concurrent consumers")
@@ -29,18 +68,16 @@ func main() {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	// spin up N consumers
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
 			runConsumer(id, *host, *rooms, stop)
 		}(i)
-		// small stagger to avoid thundering herd on connect
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	// reporter — prints throughput every 5 seconds
+	// reporter — prints throughput + latency every 5 seconds
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		var lastTotal int64
@@ -54,30 +91,39 @@ func main() {
 				delta := current - lastTotal
 				lastTotal = current
 				elapsed := time.Since(start).Seconds()
-				log.Printf("📊 [%.0fs] clients=%d  msgs/5s=%d  rate=%.1f/s  total=%d  dropped=%d",
-					elapsed,
-					*clients,
-					delta,
-					float64(delta)/5.0,
-					current,
-					totalDropped.Load(),
-				)
+
+				minL, avgL, maxL, lcount := flushLatency()
+
+				if lcount > 0 {
+					log.Printf("📊 [%.0fs] clients=%d  msgs/5s=%d  rate=%.1f/s  total=%d  dropped=%d  latency(min/avg/max)=%.2fms/%.2fms/%.2fms  samples=%d",
+						elapsed, *clients, delta, float64(delta)/5.0,
+						current, totalDropped.Load(),
+						minL, avgL, maxL, lcount,
+					)
+				} else {
+					log.Printf("📊 [%.0fs] clients=%d  msgs/5s=%d  rate=%.1f/s  total=%d  dropped=%d  latency=n/a",
+						elapsed, *clients, delta, float64(delta)/5.0,
+						current, totalDropped.Load(),
+					)
+				}
 			}
 		}
 	}()
 
-	// run for duration then stop
 	time.Sleep(time.Duration(*duration) * time.Second)
 	close(stop)
 	wg.Wait()
 
+	minL, avgL, maxL, lcount := flushLatency()
 	fmt.Printf("\n✅ Test complete.\n")
-	fmt.Printf("   Total messages received: %d\n", totalReceived.Load())
-	fmt.Printf("   Total messages dropped:  %d\n", totalDropped.Load())
-	fmt.Printf("   Avg rate: %.1f msg/s across %d clients\n",
-		float64(totalReceived.Load())/float64(*duration),
-		*clients,
-	)
+	fmt.Printf("   Total messages received : %d\n", totalReceived.Load())
+	fmt.Printf("   Total messages dropped  : %d\n", totalDropped.Load())
+	fmt.Printf("   Avg rate                : %.1f msg/s across %d clients\n",
+		float64(totalReceived.Load())/float64(*duration), *clients)
+	if lcount > 0 {
+		fmt.Printf("   Final latency batch     : min=%.2fms  avg=%.2fms  max=%.2fms  samples=%d\n",
+			minL, avgL, maxL, lcount)
+	}
 }
 
 func runConsumer(id int, host string, rooms string, stop chan struct{}) {
@@ -91,15 +137,12 @@ func runConsumer(id int, host string, rooms string, stop chan struct{}) {
 	}
 	defer conn.Close()
 
-	// subscribe to all requested rooms
 	for _, room := range splitRooms(rooms) {
 		conn.WriteJSON(map[string]string{"type": "join", "room": room})
 	}
 
-	// read messages until stop
 	msgCh := make(chan map[string]interface{}, 128)
 
-	// reader goroutine
 	go func() {
 		for {
 			var msg map[string]interface{}
@@ -120,14 +163,10 @@ func runConsumer(id int, host string, rooms string, stop chan struct{}) {
 			return
 		case msg := <-msgCh:
 			totalReceived.Add(1)
-			// measure latency for price_update messages that carry ingested_at
 			if data, ok := msg["data"].(map[string]interface{}); ok {
 				if ts, ok := data["ingested_at"].(float64); ok && ts > 0 {
 					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
-					if id == 0 {
-						// only client 0 logs latency to avoid spam
-						log.Printf("⚡ client-0 latency: %dµs", latencyUs)
-					}
+					recordLatency(latencyUs)
 				}
 			}
 		}
