@@ -61,6 +61,11 @@ func (e *OHLCEngine) Input() chan<- PriceUpdateEvent {
 	return e.input
 }
 
+// InputLen returns current number of unprocessed events in the input channel.
+func (e *OHLCEngine) InputLen() int {
+	return len(e.input)
+}
+
 func (e *OHLCEngine) Output() <-chan OHLCEvent {
 	return e.out
 }
