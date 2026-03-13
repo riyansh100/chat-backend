@@ -19,7 +19,7 @@ type SMAUpdateEvent struct {
 	Resolution   string // "1s" or "1m"
 }
 
-// bucket holds the latest SMA value computed within a time window for an instrument.
+// bucket holds the latest SMA value computed within a time window
 type bucket struct {
 	value    float64
 	hasValue bool
@@ -50,6 +50,11 @@ func NewEngine(window int) *Engine {
 
 func (e *Engine) Input() chan<- PriceUpdateEvent {
 	return e.input
+}
+
+// InputLen returns current number of unprocessed events in the input channel.
+func (e *Engine) InputLen() int {
+	return len(e.input)
 }
 
 // Output returns the 1-second SMA stream
