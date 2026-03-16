@@ -48,13 +48,13 @@ func main() {
 	go h.Run()
 
 	// 6. Background analytics worker
-	// Feeds SMA + OHLC engines directly — no consumer needs to be connected.
+	// Feeds SMA + OHLC + EMA engines directly — no consumer needs to be connected.
 	// FEED_SOURCE=binance (default) or FEED_SOURCE=mock
 	feedSource := os.Getenv("FEED_SOURCE")
 	if feedSource == "" {
 		feedSource = "binance"
 	}
-	bgWorker := background.NewWorker(feedSource, h.SMAEngine(), h.OHLCEngine())
+	bgWorker := background.NewWorker(feedSource, h.SMAEngine(), h.OHLCEngine(), h.EMAEngine())
 	go bgWorker.Start(ctx)
 	log.Printf("Background analytics worker started (source=%s)", feedSource)
 
@@ -69,6 +69,7 @@ func main() {
 		h.Metrics,
 		func() int { return h.SMAEngine().InputLen() },
 		func() int { return h.OHLCEngine().InputLen() },
+		func() int { return h.EMAEngine().InputLen() },
 	))
 
 	// 9. Server
