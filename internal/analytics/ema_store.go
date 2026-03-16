@@ -96,7 +96,7 @@ func (s *EMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	return s.rdb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
-// GetRange fetches EMA values between two unix timestamps for a given resolution.
+// GetRange fetches EMA values between two unix timestamps for a given resolution
 func (s *EMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
 	var k string
 	if resolution == "1m" {
