@@ -136,6 +136,50 @@ func (h *Hub) Run() {
 				}
 			}
 
+			// ---------------- EMA HISTORY ----------------
+			if h.emaStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, store *analytics.EMAStore, id int) {
+						for _, res := range []struct {
+							resolution string
+							n          int
+						}{
+							{"1s", 1800},
+							{"1m", 60},
+						} {
+							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
+							if err != nil || len(entries) == 0 {
+								continue
+							}
+
+							points := make([]map[string]interface{}, 0, len(entries))
+							for _, z := range entries {
+								points = append(points, map[string]interface{}{
+									"ts":    int64(z.Score),
+									"value": z.Member,
+								})
+							}
+
+							msg := Message{
+								Type: "ema_history",
+								Data: map[string]interface{}{
+									"instrument_id": id,
+									"window":        20,
+									"resolution":    res.resolution,
+									"points":        points,
+								},
+							}
+
+							select {
+							case client.Send <- msg:
+							default:
+							}
+						}
+					}(event.Client, h.emaStore, instrumentID)
+				}
+			}
+
 			// ---------------- L1 CACHE CHECK ----------------
 			key := fmt.Sprintf("instrument:%s:last", roomName)
 
@@ -264,22 +308,24 @@ func (h *Hub) Run() {
 				break
 			}
 
-			select {
-			case h.smaEngine.Input() <- analytics.PriceUpdateEvent{
+			tick := analytics.PriceUpdateEvent{
 				InstrumentID: instrumentID,
 				Price:        priceFloat,
 				Timestamp:    time.Now().UnixNano(),
-			}:
+			}
+
+			select {
+			case h.smaEngine.Input() <- tick:
 			default:
 			}
 
-			// feed OHLC engine
 			select {
-			case h.ohlcEngine.Input() <- analytics.PriceUpdateEvent{
-				InstrumentID: instrumentID,
-				Price:        priceFloat,
-				Timestamp:    time.Now().UnixNano(),
-			}:
+			case h.ohlcEngine.Input() <- tick:
+			default:
+			}
+
+			select {
+			case h.emaEngine.Input() <- tick:
 			default:
 			}
 		}
