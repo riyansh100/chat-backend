@@ -22,13 +22,15 @@ const binanceEndpoint = "wss://stream.binance.com:9443/stream?streams=" +
 type Worker struct {
 	smaEngine  *analytics.Engine
 	ohlcEngine *analytics.OHLCEngine
+	emaEngine  *analytics.EMAEngine
 	source     string // "binance" or "mock"
 }
 
-func NewWorker(source string, sma *analytics.Engine, ohlc *analytics.OHLCEngine) *Worker {
+func NewWorker(source string, sma *analytics.Engine, ohlc *analytics.OHLCEngine, ema *analytics.EMAEngine) *Worker {
 	return &Worker{
 		smaEngine:  sma,
 		ohlcEngine: ohlc,
+		emaEngine:  ema,
 		source:     source,
 	}
 }
@@ -45,7 +47,7 @@ func (w *Worker) Start(ctx context.Context) {
 	}
 }
 
-// runBinance connects to Binance WS and feeds ticks into the engines.
+// runBinance connects to Binance WS and feeds ticks into all engines.
 func (w *Worker) runBinance(ctx context.Context) {
 	out := make(chan exchange.NormalizedPriceEvent, 512)
 
@@ -79,7 +81,7 @@ func (w *Worker) runBinance(ctx context.Context) {
 	}
 }
 
-// runMock generates fake price ticks for all 10 instruments.
+// runMock generates fake price ticks for all 20 instruments.
 func (w *Worker) runMock(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -113,7 +115,7 @@ func (w *Worker) runMock(ctx context.Context) {
 	}
 }
 
-// feed pushes a tick into both engines, non-blocking.
+// feed pushes a tick into all three engines, non-blocking.
 func (w *Worker) feed(tick analytics.PriceUpdateEvent) {
 	select {
 	case w.smaEngine.Input() <- tick:
@@ -123,6 +125,11 @@ func (w *Worker) feed(tick analytics.PriceUpdateEvent) {
 
 	select {
 	case w.ohlcEngine.Input() <- tick:
+	default:
+	}
+
+	select {
+	case w.emaEngine.Input() <- tick:
 	default:
 	}
 }
