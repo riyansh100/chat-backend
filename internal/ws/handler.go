@@ -20,7 +20,6 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	//apiKey := r.Header.Get("X-API-Key")
 	client := &hub.Client{
 		ID:    uuid.NewString(),
 		Conn:  conn,
