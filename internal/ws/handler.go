@@ -24,7 +24,7 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 	client := &hub.Client{
 		ID:    uuid.NewString(),
 		Conn:  conn,
-		Send:  make(chan hub.Message, 256),
+		Send:  make(chan hub.Message, 2048),
 		Rooms: make(map[string]bool),
 		Hub:   h,
 		//APIKey: apiKey,
