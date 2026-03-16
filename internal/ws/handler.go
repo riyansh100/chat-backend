@@ -26,8 +26,7 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 		Send:  make(chan hub.Message, 2048),
 		Rooms: make(map[string]bool),
 		Hub:   h,
-		//APIKey: apiKey,
-		Role: string(trading.RoleConsumer),
+		Role:  string(trading.RoleConsumer),
 	}
 
 	h.Register <- client
