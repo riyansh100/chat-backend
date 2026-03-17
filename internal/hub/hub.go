@@ -29,6 +29,10 @@ type Hub struct {
 	l1      *cache.L1Cache
 	Metrics *metrics.HubMetrics
 
+	// indicator registry — single feed path for all engines
+	registry *analytics.Registry
+
+	// per-engine typed access (needed for output channels + history)
 	smaEngine  *analytics.Engine
 	smaStore   *analytics.SMAStore
 	ohlcEngine *analytics.OHLCEngine
@@ -37,17 +41,22 @@ type Hub struct {
 	emaStore   *analytics.EMAStore
 }
 
-// SMAEngine returns the Hub's SMA engine for direct feeding by the background worker.
+// Registry returns the indicator registry for the background worker.
+func (h *Hub) Registry() *analytics.Registry {
+	return h.registry
+}
+
+// SMAEngine returns the SMA engine (for output channel + metrics).
 func (h *Hub) SMAEngine() *analytics.Engine {
 	return h.smaEngine
 }
 
-// OHLCEngine returns the Hub's OHLC engine for direct feeding by the background worker.
+// OHLCEngine returns the OHLC engine (for output channel + metrics).
 func (h *Hub) OHLCEngine() *analytics.OHLCEngine {
 	return h.ohlcEngine
 }
 
-// EMAEngine returns the Hub's EMA engine for direct feeding by the background worker.
+// EMAEngine returns the EMA engine (for output channel + metrics).
 func (h *Hub) EMAEngine() *analytics.EMAEngine {
 	return h.emaEngine
 }
