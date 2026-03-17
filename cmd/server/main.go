@@ -19,19 +19,12 @@ import (
 )
 
 func main() {
-	// 1. Instance identity
 	instanceID := uuid.NewString()
 	log.Println("instanceID:", instanceID)
 
-	// 2. Redis
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6380",
-	})
-
-	// 3. Redis cache
+	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6380"})
 	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
 
-	// 4. Postgres
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	pool, err := pgxpool.New(context.Background(), pgConnStr)
 	if err != nil {
@@ -40,31 +33,27 @@ func main() {
 	defer pool.Close()
 	log.Println("Postgres connected")
 
-	// 5. Hub
 	h := hub.NewHub(instanceID, redisCache, rdb, pool)
 
 	ctx := context.Background()
 	hub.StartRedisSubscriber(ctx, rdb, h)
 	go h.Run()
 
-	// 6. Background analytics worker
-	// Feeds SMA + OHLC + EMA engines directly — no consumer needs to be connected.
-	// FEED_SOURCE=binance (default) or FEED_SOURCE=mock
 	feedSource := os.Getenv("FEED_SOURCE")
 	if feedSource == "" {
 		feedSource = "binance"
 	}
-	bgWorker := background.NewWorker(feedSource, h.SMAEngine(), h.OHLCEngine(), h.EMAEngine())
+
+	// Worker now takes the registry — adding a new engine in future = zero changes here
+	bgWorker := background.NewWorker(feedSource, h.Registry())
 	go bgWorker.Start(ctx)
 	log.Printf("Background analytics worker started (source=%s)", feedSource)
 
-	// 7. WebSocket handlers
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, w, r)
 	})
 	http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
 
-	// 8. Metrics endpoint — hit localhost:8080/metrics to see live stats
 	http.HandleFunc("/metrics", metrics.Handler(
 		h.Metrics,
 		func() int { return h.SMAEngine().InputLen() },
@@ -72,7 +61,6 @@ func main() {
 		func() int { return h.EMAEngine().InputLen() },
 	))
 
-	// 9. Server
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
