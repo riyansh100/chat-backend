@@ -24,27 +24,28 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	m.StartLogger()
 
 	hub := &Hub{
-		InstanceID: instanceID,
-
+		InstanceID:  instanceID,
 		Rooms:       make(map[string]*Room),
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
 		pgPool:      pool,
-
-		Metrics: m,
-
-		Register:   make(chan *Client),
-		Unregister: make(chan *Client),
-		JoinRoom:   make(chan JoinRoomEvent),
-		LeaveRoom:  make(chan LeaveRoomEvent),
-		Broadcast:  make(chan BroadcastEvent),
+		Metrics:     m,
+		Register:    make(chan *Client),
+		Unregister:  make(chan *Client),
+		JoinRoom:    make(chan JoinRoomEvent),
+		LeaveRoom:   make(chan LeaveRoomEvent),
+		Broadcast:   make(chan BroadcastEvent),
 	}
+
+	// ---- Indicator registry ----
+	hub.registry = analytics.NewRegistry()
 
 	// ---- SMA engine ----
 	sma := analytics.NewEngine(20)
 	go sma.Run()
 	hub.smaEngine = sma
+	hub.registry.Register(sma) // register into feed path
 
 	var smaStore *analytics.SMAStore
 	if hub.RedisClient != nil {
@@ -52,41 +53,36 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		hub.smaStore = smaStore
 	}
 
-	smaToHub := func(smaEvent analytics.SMAUpdateEvent) {
-		roomName := strconv.Itoa(smaEvent.InstrumentID)
+	smaToHub := func(e analytics.SMAUpdateEvent) {
 		data, _ := json.Marshal(map[string]interface{}{
-			"instrument_id": smaEvent.InstrumentID,
-			"value":         smaEvent.Value,
-			"timestamp":     smaEvent.Timestamp,
-			"resolution":    smaEvent.Resolution,
+			"instrument_id": e.InstrumentID,
+			"value":         e.Value,
+			"timestamp":     e.Timestamp,
+			"resolution":    e.Resolution,
 		})
 		hub.Broadcast <- BroadcastEvent{
-			Room:   roomName,
-			Origin: hub.InstanceID,
-			Message: Message{
-				Type: "sma_update",
-				Data: json.RawMessage(data),
-			},
+			Room:    strconv.Itoa(e.InstrumentID),
+			Origin:  hub.InstanceID,
+			Message: Message{Type: "sma_update", Data: json.RawMessage(data)},
 		}
 	}
 
 	go func() {
-		for smaEvent := range hub.smaEngine.Output() {
-			smaToHub(smaEvent)
+		for e := range hub.smaEngine.Output() {
+			smaToHub(e)
 			if smaStore != nil {
-				if err := smaStore.Write(context.Background(), smaEvent); err != nil {
-					log.Printf("SMA 1s write error (instrument %d): %v", smaEvent.InstrumentID, err)
+				if err := smaStore.Write(context.Background(), e); err != nil {
+					log.Printf("SMA 1s write error (instrument %d): %v", e.InstrumentID, err)
 				}
 			}
 		}
 	}()
-
 	go func() {
-		for smaEvent := range hub.smaEngine.OutputMin() {
-			smaToHub(smaEvent)
+		for e := range hub.smaEngine.OutputMin() {
+			smaToHub(e)
 			if smaStore != nil {
-				if err := smaStore.Write(context.Background(), smaEvent); err != nil {
-					log.Printf("SMA 1m write error (instrument %d): %v", smaEvent.InstrumentID, err)
+				if err := smaStore.Write(context.Background(), e); err != nil {
+					log.Printf("SMA 1m write error (instrument %d): %v", e.InstrumentID, err)
 				}
 			}
 		}
@@ -96,6 +92,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	ohlc := analytics.NewOHLCEngine()
 	go ohlc.Run()
 	hub.ohlcEngine = ohlc
+	hub.registry.Register(ohlc) // register into feed path
 
 	var ohlcStore *analytics.OHLCStore
 	if hub.RedisClient != nil && hub.pgPool != nil {
@@ -104,29 +101,24 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	}
 
 	go func() {
-		for ohlcEvent := range hub.ohlcEngine.Output() {
-			roomName := strconv.Itoa(ohlcEvent.InstrumentID)
+		for e := range hub.ohlcEngine.Output() {
 			data, _ := json.Marshal(map[string]interface{}{
-				"instrument_id": ohlcEvent.InstrumentID,
-				"resolution":    ohlcEvent.Resolution,
-				"open":          ohlcEvent.Open,
-				"high":          ohlcEvent.High,
-				"low":           ohlcEvent.Low,
-				"close":         ohlcEvent.Close,
-				"timestamp":     ohlcEvent.Timestamp,
+				"instrument_id": e.InstrumentID,
+				"resolution":    e.Resolution,
+				"open":          e.Open,
+				"high":          e.High,
+				"low":           e.Low,
+				"close":         e.Close,
+				"timestamp":     e.Timestamp,
 			})
 			hub.Broadcast <- BroadcastEvent{
-				Room:   roomName,
-				Origin: hub.InstanceID,
-				Message: Message{
-					Type: "ohlc_update",
-					Data: json.RawMessage(data),
-				},
+				Room:    strconv.Itoa(e.InstrumentID),
+				Origin:  hub.InstanceID,
+				Message: Message{Type: "ohlc_update", Data: json.RawMessage(data)},
 			}
-
 			if ohlcStore != nil {
-				if err := ohlcStore.Write(context.Background(), ohlcEvent); err != nil {
-					log.Printf("OHLC write error (instrument %d): %v", ohlcEvent.InstrumentID, err)
+				if err := ohlcStore.Write(context.Background(), e); err != nil {
+					log.Printf("OHLC write error (instrument %d): %v", e.InstrumentID, err)
 				}
 			}
 		}
@@ -136,6 +128,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	ema := analytics.NewEMAEngine(20)
 	go ema.Run()
 	hub.emaEngine = ema
+	hub.registry.Register(ema) // register into feed path
 
 	var emaStore *analytics.EMAStore
 	if hub.RedisClient != nil {
@@ -143,41 +136,36 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		hub.emaStore = emaStore
 	}
 
-	emaToHub := func(emaEvent analytics.EMAUpdateEvent) {
-		roomName := strconv.Itoa(emaEvent.InstrumentID)
+	emaToHub := func(e analytics.EMAUpdateEvent) {
 		data, _ := json.Marshal(map[string]interface{}{
-			"instrument_id": emaEvent.InstrumentID,
-			"value":         emaEvent.Value,
-			"timestamp":     emaEvent.Timestamp,
-			"resolution":    emaEvent.Resolution,
+			"instrument_id": e.InstrumentID,
+			"value":         e.Value,
+			"timestamp":     e.Timestamp,
+			"resolution":    e.Resolution,
 		})
 		hub.Broadcast <- BroadcastEvent{
-			Room:   roomName,
-			Origin: hub.InstanceID,
-			Message: Message{
-				Type: "ema_update",
-				Data: json.RawMessage(data),
-			},
+			Room:    strconv.Itoa(e.InstrumentID),
+			Origin:  hub.InstanceID,
+			Message: Message{Type: "ema_update", Data: json.RawMessage(data)},
 		}
 	}
 
 	go func() {
-		for emaEvent := range hub.emaEngine.Output() {
-			emaToHub(emaEvent)
+		for e := range hub.emaEngine.Output() {
+			emaToHub(e)
 			if emaStore != nil {
-				if err := emaStore.Write(context.Background(), emaEvent); err != nil {
-					log.Printf("EMA 1s write error (instrument %d): %v", emaEvent.InstrumentID, err)
+				if err := emaStore.Write(context.Background(), e); err != nil {
+					log.Printf("EMA 1s write error (instrument %d): %v", e.InstrumentID, err)
 				}
 			}
 		}
 	}()
-
 	go func() {
-		for emaEvent := range hub.emaEngine.OutputMin() {
-			emaToHub(emaEvent)
+		for e := range hub.emaEngine.OutputMin() {
+			emaToHub(e)
 			if emaStore != nil {
-				if err := emaStore.Write(context.Background(), emaEvent); err != nil {
-					log.Printf("EMA 1m write error (instrument %d): %v", emaEvent.InstrumentID, err)
+				if err := emaStore.Write(context.Background(), e); err != nil {
+					log.Printf("EMA 1m write error (instrument %d): %v", e.InstrumentID, err)
 				}
 			}
 		}
