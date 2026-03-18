@@ -2,7 +2,6 @@ package hub
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"time"
 
@@ -24,20 +23,21 @@ func (c *Client) WritePump() {
 
 	for {
 		select {
+		// push path — room broadcasts
 		case msg, ok := <-c.Send:
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				return
 			}
+			if err := c.Conn.WriteJSON(msg); err != nil {
+				return
+			}
 
-			// 🔥 Measure latency ONLY for price updates
-			if data, ok := msg.Data.(map[string]interface{}); ok {
-				if ts, exists := data["ingested_at"]; exists {
-					if ingestedAt, ok := ts.(int64); ok {
-						latency := time.Now().UnixNano() - ingestedAt
-						log.Printf("Latency (µs): %d", latency/1000)
-					}
-				}
+		// pull path — explicit indicator subscriptions
+		case msg, ok := <-c.IndicatorFeed:
+			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				return
 			}
 			if err := c.Conn.WriteJSON(msg); err != nil {
 				return
@@ -53,7 +53,6 @@ func (c *Client) WritePump() {
 }
 
 func (c *Client) ReadPump() {
-
 	defer func() {
 		c.Hub.Unregister <- c
 		c.Conn.Close()
@@ -67,80 +66,72 @@ func (c *Client) ReadPump() {
 
 	for {
 		var raw map[string]interface{}
-
-		// Read raw JSON (transport responsibility only)
 		if err := c.Conn.ReadJSON(&raw); err != nil {
 			break
 		}
 
-		// Extract type
 		msgType, ok := raw["type"].(string)
 		if !ok {
 			continue
 		}
 		delete(raw, "type")
 
-		// Build domain envelope
-		env := common.Envelope{
-			Type: msgType,
-			Body: raw,
+		// ---- pull model: subscribe / unsubscribe ----
+		if msgType == "subscribe" {
+			topic, ok := raw["topic"].(string)
+			if !ok || topic == "" {
+				continue
+			}
+			c.Hub.Subscribe <- SubscribeEvent{Client: c, Topic: topic}
+			continue
 		}
 
+		if msgType == "unsubscribe" {
+			topic, ok := raw["topic"].(string)
+			if !ok || topic == "" {
+				continue
+			}
+			c.Hub.Unsubscribe <- UnsubscribeEvent{Client: c, Topic: topic}
+			continue
+		}
+
+		// ---- existing push model: join / leave / message ----
+		env := common.Envelope{Type: msgType, Body: raw}
+
 		switch c.Role {
-
 		case string(trading.RoleConsumer):
-
 			chatEvents, err := chat.ValidateAndTranslate(env, c.Rooms)
 			if err != nil {
 				continue
 			}
-
 			for _, e := range chatEvents {
 				switch ev := e.(type) {
-
 				case chat.JoinEvent:
-					c.Hub.JoinRoom <- JoinRoomEvent{
-						Client: c,
-						Room:   ev.Room,
-					}
-
+					c.Hub.JoinRoom <- JoinRoomEvent{Client: c, Room: ev.Room}
 				case chat.LeaveEvent:
-					c.Hub.LeaveRoom <- LeaveRoomEvent{
-						Client: c,
-						Room:   ev.Room,
-					}
-
+					c.Hub.LeaveRoom <- LeaveRoomEvent{Client: c, Room: ev.Room}
 				case chat.MessageEvent:
 					c.Hub.Broadcast <- BroadcastEvent{
-						Room:   ev.Room,
-						Origin: c.Hub.InstanceID,
-						Message: Message{
-							Room: ev.Room,
-							Data: ev.Data,
-						},
+						Room:    ev.Room,
+						Origin:  c.Hub.InstanceID,
+						Message: Message{Room: ev.Room, Data: ev.Data},
 					}
 				}
 			}
 
 		case string(trading.RoleIngestor):
-
 			tradingEvents, err := trading.ValidateAndTranslate(env, trading.RoleIngestor)
 			if err != nil {
 				continue
 			}
-
 			for _, e := range tradingEvents {
 				switch ev := e.(type) {
-
 				case trading.PriceUpdateEvent:
 					ev.IngestedAt = time.Now().UnixNano()
 					c.Hub.Metrics.EventsIngested.Add(1)
-					// --- Phase 4: Redis KV warm-start write (production-safe) ---
+
 					if c.Hub.redisCache != nil {
-
 						ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-
-						// ✅ Redis key uses InstrumentID (Stage A change)
 						_ = c.Hub.redisCache.SetLastPrice(
 							ctx,
 							strconv.Itoa(ev.InstrumentID),
@@ -148,14 +139,12 @@ func (c *Client) ReadPump() {
 								"type":       "price_update",
 								"price":      ev.Price,
 								"ts":         ev.Timestamp,
-								"instrument": ev.Instrument, // ⚠️ keep string for now
+								"instrument": ev.Instrument,
 							},
 						)
-
 						cancel()
 					}
 
-					// ✅ Broadcast still uses STRING room (Stage A safety)
 					roomID := strconv.Itoa(ev.InstrumentID)
 					c.Hub.Broadcast <- BroadcastEvent{
 						Room:   roomID,
@@ -171,7 +160,6 @@ func (c *Client) ReadPump() {
 							},
 						},
 					}
-
 				}
 			}
 		}
