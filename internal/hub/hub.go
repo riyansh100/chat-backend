@@ -37,10 +37,13 @@ type Hub struct {
 	ohlcStore  *analytics.OHLCStore
 	emaEngine  *analytics.EMAEngine
 	emaStore   *analytics.EMAStore
+	bbEngine   *analytics.BBEngine
+	bbStore    *analytics.BBStore
 }
 
 func (h *Hub) Registry() *analytics.Registry     { return h.registry }
 func (h *Hub) SMAEngine() *analytics.Engine      { return h.smaEngine }
 func (h *Hub) OHLCEngine() *analytics.OHLCEngine { return h.ohlcEngine }
 func (h *Hub) EMAEngine() *analytics.EMAEngine   { return h.emaEngine }
+func (h *Hub) BBEngine() *analytics.BBEngine     { return h.bbEngine }
 func (h *Hub) SubManager() *SubscriptionManager  { return h.subManager }
