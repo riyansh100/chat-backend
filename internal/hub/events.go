@@ -13,5 +13,15 @@ type LeaveRoomEvent struct {
 type BroadcastEvent struct {
 	Room    string
 	Message Message
-	Origin  string // instanceID of the source
+	Origin  string
+}
+
+type SubscribeEvent struct {
+	Client *Client
+	Topic  string // e.g. "sma:101", "ema:102", "ohlc:101"
+}
+
+type UnsubscribeEvent struct {
+	Client *Client
+	Topic  string
 }

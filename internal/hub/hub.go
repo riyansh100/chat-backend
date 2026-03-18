@@ -17,22 +17,20 @@ type Hub struct {
 	Register   chan *Client
 	Unregister chan *Client
 
-	JoinRoom  chan JoinRoomEvent
-	LeaveRoom chan LeaveRoomEvent
-
-	Broadcast chan BroadcastEvent
+	JoinRoom    chan JoinRoomEvent
+	LeaveRoom   chan LeaveRoomEvent
+	Broadcast   chan BroadcastEvent
+	Subscribe   chan SubscribeEvent
+	Unsubscribe chan UnsubscribeEvent
 
 	InstanceID string
-
 	redisCache chatredis.Cache
+	l1         *cache.L1Cache
+	Metrics    *metrics.HubMetrics
 
-	l1      *cache.L1Cache
-	Metrics *metrics.HubMetrics
+	subManager *SubscriptionManager
+	registry   *analytics.Registry
 
-	// indicator registry — single feed path for all engines
-	registry *analytics.Registry
-
-	// per-engine typed access (needed for output channels + history)
 	smaEngine  *analytics.Engine
 	smaStore   *analytics.SMAStore
 	ohlcEngine *analytics.OHLCEngine
@@ -41,22 +39,8 @@ type Hub struct {
 	emaStore   *analytics.EMAStore
 }
 
-// Registry returns the indicator registry for the background worker.
-func (h *Hub) Registry() *analytics.Registry {
-	return h.registry
-}
-
-// SMAEngine returns the SMA engine (for output channel + metrics).
-func (h *Hub) SMAEngine() *analytics.Engine {
-	return h.smaEngine
-}
-
-// OHLCEngine returns the OHLC engine (for output channel + metrics).
-func (h *Hub) OHLCEngine() *analytics.OHLCEngine {
-	return h.ohlcEngine
-}
-
-// EMAEngine returns the EMA engine (for output channel + metrics).
-func (h *Hub) EMAEngine() *analytics.EMAEngine {
-	return h.emaEngine
-}
+func (h *Hub) Registry() *analytics.Registry     { return h.registry }
+func (h *Hub) SMAEngine() *analytics.Engine      { return h.smaEngine }
+func (h *Hub) OHLCEngine() *analytics.OHLCEngine { return h.ohlcEngine }
+func (h *Hub) EMAEngine() *analytics.EMAEngine   { return h.emaEngine }
+func (h *Hub) SubManager() *SubscriptionManager  { return h.subManager }
