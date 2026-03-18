@@ -3,14 +3,18 @@ package hub
 import "github.com/gorilla/websocket"
 
 type Client struct {
-	ID    string // NEW: unique client identifier
-	Conn  *websocket.Conn
-	Send  chan Message
+	ID   string
+	Conn *websocket.Conn
+
+	// Push path — hub broadcasts everything the client's rooms receive
+	Send chan Message
+
+	// Pull path — only topics the client explicitly subscribed to
+	IndicatorFeed chan Message
+
 	Rooms map[string]bool
 	Hub   *Hub
 
 	Dropped int
-	Role    string // NEW: domain-agnostic role (default CONSUMER)
-	//APIKey        string
-	//Authenticated bool
+	Role    string
 }

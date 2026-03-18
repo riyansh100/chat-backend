@@ -32,12 +32,29 @@ func (h *Hub) Run() {
 					h.Metrics.ActiveRooms.Add(-1)
 				}
 			}
+			// clean up all pull subscriptions for this client
+			h.subManager.UnsubscribeAll(client.ID)
+
+		// ---------------- SUBSCRIBE (pull model) ----------------
+		case event := <-h.Subscribe:
+			h.subManager.Subscribe(event.Client.ID, event.Topic, event.Client.IndicatorFeed)
+			// ack back to client
+			event.Client.IndicatorFeed <- Message{
+				Type: "subscribed",
+				Data: map[string]interface{}{"topic": event.Topic},
+			}
+
+		// ---------------- UNSUBSCRIBE (pull model) ----------------
+		case event := <-h.Unsubscribe:
+			h.subManager.Unsubscribe(event.Client.ID, event.Topic)
+			event.Client.IndicatorFeed <- Message{
+				Type: "unsubscribed",
+				Data: map[string]interface{}{"topic": event.Topic},
+			}
 
 		// ---------------- JOIN ROOM ----------------
 		case event := <-h.JoinRoom:
-
 			roomName := event.Room
-
 			if id, ok := trading.SymbolToID[roomName]; ok {
 				roomName = strconv.Itoa(id)
 			}
@@ -54,7 +71,6 @@ func (h *Hub) Run() {
 
 			room.Clients[event.Client] = true
 			event.Client.Rooms[roomName] = true
-
 			fmt.Println(event.Client.ID, "joined", roomName)
 
 			// ---------------- SMA HISTORY ----------------
@@ -73,16 +89,14 @@ func (h *Hub) Run() {
 							if err != nil || len(entries) == 0 {
 								continue
 							}
-
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
 								points = append(points, map[string]interface{}{
-									"ts":    int64(z.Score),
-									"value": z.Member,
+									"ts": int64(z.Score), "value": z.Member,
 								})
 							}
-
-							msg := Message{
+							select {
+							case client.Send <- Message{
 								Type: "sma_history",
 								Data: map[string]interface{}{
 									"instrument_id": id,
@@ -90,10 +104,7 @@ func (h *Hub) Run() {
 									"resolution":    res.resolution,
 									"points":        points,
 								},
-							}
-
-							select {
-							case client.Send <- msg:
+							}:
 							default:
 							}
 						}
@@ -110,26 +121,21 @@ func (h *Hub) Run() {
 						if err != nil || len(entries) == 0 {
 							return
 						}
-
 						candles := make([]map[string]interface{}, 0, len(entries))
 						for _, z := range entries {
 							candles = append(candles, map[string]interface{}{
-								"ts":     int64(z.Score),
-								"candle": z.Member,
+								"ts": int64(z.Score), "candle": z.Member,
 							})
 						}
-
-						msg := Message{
+						select {
+						case client.Send <- Message{
 							Type: "ohlc_history",
 							Data: map[string]interface{}{
 								"instrument_id": id,
 								"resolution":    "1m",
 								"candles":       candles,
 							},
-						}
-
-						select {
-						case client.Send <- msg:
+						}:
 						default:
 						}
 					}(event.Client, h.ohlcStore, instrumentID)
@@ -152,16 +158,14 @@ func (h *Hub) Run() {
 							if err != nil || len(entries) == 0 {
 								continue
 							}
-
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
 								points = append(points, map[string]interface{}{
-									"ts":    int64(z.Score),
-									"value": z.Member,
+									"ts": int64(z.Score), "value": z.Member,
 								})
 							}
-
-							msg := Message{
+							select {
+							case client.Send <- Message{
 								Type: "ema_history",
 								Data: map[string]interface{}{
 									"instrument_id": id,
@@ -169,10 +173,7 @@ func (h *Hub) Run() {
 									"resolution":    res.resolution,
 									"points":        points,
 								},
-							}
-
-							select {
-							case client.Send <- msg:
+							}:
 							default:
 							}
 						}
@@ -182,7 +183,6 @@ func (h *Hub) Run() {
 
 			// ---------------- L1 CACHE CHECK ----------------
 			key := fmt.Sprintf("instrument:%s:last", roomName)
-
 			if val, ok := h.l1.Get(key); ok {
 				if msg, ok := val.(Message); ok {
 					fmt.Println("L1 HIT:", roomName)
@@ -192,7 +192,7 @@ func (h *Hub) Run() {
 					default:
 						event.Client.Dropped++
 						if event.Client.Dropped > maxDroppedMessages {
-							fmt.Println("Disconnecting slow client:", event.Client.ID, "drops:", event.Client.Dropped)
+							fmt.Println("Disconnecting slow client:", event.Client.ID)
 							h.Unregister <- event.Client
 						}
 					}
@@ -202,26 +202,17 @@ func (h *Hub) Run() {
 
 			// ---------------- REDIS FALLBACK ----------------
 			if h.redisCache != nil {
-				data, err := h.redisCache.GetLastPrice(
-					context.Background(),
-					roomName,
-				)
-
+				data, err := h.redisCache.GetLastPrice(context.Background(), roomName)
 				if err == nil {
-					msg := Message{
-						Type: roomName,
-						Data: json.RawMessage(data),
-					}
-
+					msg := Message{Type: roomName, Data: json.RawMessage(data)}
 					h.l1.Set(key, msg)
-
 					select {
 					case event.Client.Send <- msg:
 						event.Client.Dropped = 0
 					default:
 						event.Client.Dropped++
 						if event.Client.Dropped > maxDroppedMessages {
-							fmt.Println("Disconnecting slow client:", event.Client.ID, "drops:", event.Client.Dropped)
+							fmt.Println("Disconnecting slow client:", event.Client.ID)
 							h.Unregister <- event.Client
 						}
 					}
@@ -230,13 +221,10 @@ func (h *Hub) Run() {
 
 		// ---------------- LEAVE ROOM ----------------
 		case event := <-h.LeaveRoom:
-
 			roomName := event.Room
-
 			if id, ok := trading.SymbolToID[roomName]; ok {
 				roomName = strconv.Itoa(id)
 			}
-
 			if room, ok := h.Rooms[roomName]; ok {
 				delete(room.Clients, event.Client)
 				fmt.Println(event.Client.ID, "left", roomName)
@@ -265,7 +253,7 @@ func (h *Hub) Run() {
 					h.Metrics.MessagesDropped.Add(1)
 					client.Dropped++
 					if client.Dropped > maxDroppedMessages {
-						fmt.Println("Disconnecting slow client:", client.ID, "drops:", client.Dropped)
+						fmt.Println("Disconnecting slow client:", client.ID)
 						h.Unregister <- client
 					}
 				}
@@ -280,11 +268,7 @@ func (h *Hub) Run() {
 					Origin: h.InstanceID,
 				}
 				payload, _ := json.Marshal(rm)
-				go h.RedisClient.Publish(
-					context.Background(),
-					"chat:events",
-					payload,
-				)
+				go h.RedisClient.Publish(context.Background(), "chat:events", payload)
 			}
 
 			// ---------------- ANALYTICS LAYER ----------------
@@ -292,17 +276,14 @@ func (h *Hub) Run() {
 			if err != nil {
 				break
 			}
-
 			dataMap, ok := event.Message.Data.(map[string]interface{})
 			if !ok {
 				break
 			}
-
 			priceVal, ok := dataMap["price"]
 			if !ok {
 				break
 			}
-
 			priceFloat, ok := priceVal.(float64)
 			if !ok {
 				break
@@ -313,17 +294,14 @@ func (h *Hub) Run() {
 				Price:        priceFloat,
 				Timestamp:    time.Now().UnixNano(),
 			}
-
 			select {
 			case h.smaEngine.Input() <- tick:
 			default:
 			}
-
 			select {
 			case h.ohlcEngine.Input() <- tick:
 			default:
 			}
-
 			select {
 			case h.emaEngine.Input() <- tick:
 			default:
