@@ -65,12 +65,8 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		msg := Message{Type: "sma_update", Data: json.RawMessage(data)}
 		room := strconv.Itoa(e.InstrumentID)
 
-		// push path — existing room broadcast
 		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
-
-		// pull path — fanout to explicit subscribers
-		topic := "sma:" + room
-		hub.subManager.Fanout(topic, msg)
+		hub.subManager.Fanout("sma:"+room, msg)
 	}
 
 	go func() {
@@ -178,5 +174,40 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		}
 	}()
 
+	// ---- Bollinger Bands ----
+	bb := analytics.NewBBEngine(20, 2.0)
+	go bb.Run()
+	hub.bbEngine = bb
+	hub.registry.Register(bb)
+
+	var bbStore *analytics.BBStore
+	if rdb != nil {
+		bbStore = analytics.NewBBStore(rdb, pool)
+		hub.bbStore = bbStore
+	}
+
+	go func() {
+		for e := range hub.bbEngine.Output() {
+			data, _ := json.Marshal(map[string]interface{}{
+				"instrument_id": e.InstrumentID,
+				"upper":         e.Upper,
+				"middle":        e.Middle,
+				"lower":         e.Lower,
+				"timestamp":     e.Timestamp,
+				"resolution":    e.Resolution,
+			})
+			msg := Message{Type: "bb_update", Data: json.RawMessage(data)}
+			room := strconv.Itoa(e.InstrumentID)
+
+			hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+			hub.subManager.Fanout("bb:"+room, msg)
+
+			if bbStore != nil {
+				if err := bbStore.Write(context.Background(), e); err != nil {
+					log.Printf("BB write error (instrument %d): %v", e.InstrumentID, err)
+				}
+			}
+		}
+	}()
 	return hub
 }
