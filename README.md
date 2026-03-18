@@ -431,22 +431,22 @@ Invoke-RestMethod http://localhost:8080/metrics | ConvertTo-Json
 
 # Current System Capabilities
 
-✔ Real-time Binance exchange ingestion (20 instruments)
-✔ Deterministic single-writer event routing
-✔ Multi-room push subscriptions
-✔ Fine-grained pull subscriptions (per indicator per instrument)
-✔ Push + pull coexistence on same connection
-✔ Indicator registry (zero-change extensibility for new engines)
-✔ SMA engine — 1s + 1m resolutions
-✔ EMA engine — 1s + 1m resolutions
-✔ OHLC engine — 1m candles
-✔ Redis warm-start (sorted sets per engine per instrument)
-✔ Postgres data lake (SMA, EMA, OHLC tables)
-✔ History delivery on room join
-✔ Cross-instance event fan-out via Redis pub/sub
-✔ Backpressure control with client eviction
-✔ Live metrics endpoint
-✔ Push + pull load testers
+✔ Real-time Binance exchange ingestion (20 instruments) <br>
+✔ Deterministic single-writer event routing <br>
+✔ Multi-room push subscriptions <br>
+✔ Fine-grained pull subscriptions (per indicator per instrument) <br>
+✔ Push + pull coexistence on same connection <br>
+✔ Indicator registry (zero-change extensibility for new engines) <br>
+✔ SMA engine — 1s + 1m resolutions <br>
+✔ EMA engine — 1s + 1m resolutions <br>
+✔ OHLC engine — 1m candles <br>
+✔ Redis warm-start (sorted sets per engine per instrument) <br>
+✔ Postgres data lake (SMA, EMA, OHLC tables) <br>
+✔ History delivery on room join <br>
+✔ Cross-instance event fan-out via Redis pub/sub <br>
+✔ Backpressure control with client eviction <br>
+✔ Live metrics endpoint <br>
+✔ Push + pull load testers <br>
 
 ---
 
