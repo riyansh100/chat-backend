@@ -1,5 +1,3 @@
-// 📌 This file does only one thing:
-// HTTP → WebSocket → Client creation
 package ws
 
 import (
@@ -21,12 +19,13 @@ func ServeWS(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := &hub.Client{
-		ID:    uuid.NewString(),
-		Conn:  conn,
-		Send:  make(chan hub.Message, 2048),
-		Rooms: make(map[string]bool),
-		Hub:   h,
-		Role:  string(trading.RoleConsumer),
+		ID:            uuid.NewString(),
+		Conn:          conn,
+		Send:          make(chan hub.Message, 2048), // push path
+		IndicatorFeed: make(chan hub.Message, 256),  // pull path
+		Rooms:         make(map[string]bool),
+		Hub:           h,
+		Role:          string(trading.RoleConsumer),
 	}
 
 	h.Register <- client
