@@ -20,6 +20,7 @@ type Snapshot struct {
 	SMAInputLen  int `json:"sma_input_len"`
 	OHLCInputLen int `json:"ohlc_input_len"`
 	EMAInputLen  int `json:"ema_input_len"`
+	BBInputLen   int `json:"bb_input_len"`
 
 	// Go runtime
 	Goroutines int     `json:"goroutines"`
@@ -28,8 +29,7 @@ type Snapshot struct {
 }
 
 // Handler returns an HTTP handler that serves a JSON metrics snapshot.
-// smaLen, ohlcLen, and emaLen are functions so we read channel length at request time.
-func Handler(m *HubMetrics, smaLen func() int, ohlcLen func() int, emaLen func() int) http.HandlerFunc {
+func Handler(m *HubMetrics, smaLen func() int, ohlcLen func() int, emaLen func() int, bbLen func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var mem runtime.MemStats
 		runtime.ReadMemStats(&mem)
@@ -45,6 +45,7 @@ func Handler(m *HubMetrics, smaLen func() int, ohlcLen func() int, emaLen func()
 			SMAInputLen:  smaLen(),
 			OHLCInputLen: ohlcLen(),
 			EMAInputLen:  emaLen(),
+			BBInputLen:   bbLen(),
 
 			Goroutines: runtime.NumGoroutine(),
 			HeapMB:     float64(mem.HeapAlloc) / 1024 / 1024,
