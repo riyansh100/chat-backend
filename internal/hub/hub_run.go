@@ -32,13 +32,11 @@ func (h *Hub) Run() {
 					h.Metrics.ActiveRooms.Add(-1)
 				}
 			}
-			// clean up all pull subscriptions for this client
 			h.subManager.UnsubscribeAll(client.ID)
 
 		// ---------------- SUBSCRIBE (pull model) ----------------
 		case event := <-h.Subscribe:
 			h.subManager.Subscribe(event.Client.ID, event.Topic, event.Client.IndicatorFeed)
-			// ack back to client
 			event.Client.IndicatorFeed <- Message{
 				Type: "subscribed",
 				Data: map[string]interface{}{"topic": event.Topic},
@@ -181,6 +179,38 @@ func (h *Hub) Run() {
 				}
 			}
 
+			// ---------------- BB HISTORY ----------------
+			if h.bbStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, store *analytics.BBStore, id int) {
+						entries, err := store.GetLast(context.Background(), id, 60)
+						if err != nil || len(entries) == 0 {
+							return
+						}
+						candles := make([]map[string]interface{}, 0, len(entries))
+						for _, z := range entries {
+							candles = append(candles, map[string]interface{}{
+								"ts": int64(z.Score), "band": z.Member,
+							})
+						}
+						select {
+						case client.Send <- Message{
+							Type: "bb_history",
+							Data: map[string]interface{}{
+								"instrument_id": id,
+								"resolution":    "1m",
+								"window":        20,
+								"k":             2.0,
+								"bands":         candles,
+							},
+						}:
+						default:
+						}
+					}(event.Client, h.bbStore, instrumentID)
+				}
+			}
+
 			// ---------------- L1 CACHE CHECK ----------------
 			key := fmt.Sprintf("instrument:%s:last", roomName)
 			if val, ok := h.l1.Get(key); ok {
@@ -304,6 +334,10 @@ func (h *Hub) Run() {
 			}
 			select {
 			case h.emaEngine.Input() <- tick:
+			default:
+			}
+			select {
+			case h.bbEngine.Input() <- tick:
 			default:
 			}
 		}
