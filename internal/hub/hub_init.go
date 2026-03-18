@@ -36,20 +36,22 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		JoinRoom:    make(chan JoinRoomEvent),
 		LeaveRoom:   make(chan LeaveRoomEvent),
 		Broadcast:   make(chan BroadcastEvent),
+		Subscribe:   make(chan SubscribeEvent),
+		Unsubscribe: make(chan UnsubscribeEvent),
 	}
 
-	// ---- Indicator registry ----
+	hub.subManager = NewSubscriptionManager()
 	hub.registry = analytics.NewRegistry()
 
-	// ---- SMA engine ----
+	// ---- SMA ----
 	sma := analytics.NewEngine(20)
 	go sma.Run()
 	hub.smaEngine = sma
-	hub.registry.Register(sma) // register into feed path
+	hub.registry.Register(sma)
 
 	var smaStore *analytics.SMAStore
-	if hub.RedisClient != nil {
-		smaStore = analytics.NewSMAStore(hub.RedisClient, hub.pgPool)
+	if rdb != nil {
+		smaStore = analytics.NewSMAStore(rdb, pool)
 		hub.smaStore = smaStore
 	}
 
@@ -60,11 +62,15 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 			"timestamp":     e.Timestamp,
 			"resolution":    e.Resolution,
 		})
-		hub.Broadcast <- BroadcastEvent{
-			Room:    strconv.Itoa(e.InstrumentID),
-			Origin:  hub.InstanceID,
-			Message: Message{Type: "sma_update", Data: json.RawMessage(data)},
-		}
+		msg := Message{Type: "sma_update", Data: json.RawMessage(data)}
+		room := strconv.Itoa(e.InstrumentID)
+
+		// push path — existing room broadcast
+		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+
+		// pull path — fanout to explicit subscribers
+		topic := "sma:" + room
+		hub.subManager.Fanout(topic, msg)
 	}
 
 	go func() {
@@ -88,15 +94,15 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		}
 	}()
 
-	// ---- OHLC engine ----
+	// ---- OHLC ----
 	ohlc := analytics.NewOHLCEngine()
 	go ohlc.Run()
 	hub.ohlcEngine = ohlc
-	hub.registry.Register(ohlc) // register into feed path
+	hub.registry.Register(ohlc)
 
 	var ohlcStore *analytics.OHLCStore
-	if hub.RedisClient != nil && hub.pgPool != nil {
-		ohlcStore = analytics.NewOHLCStore(hub.RedisClient, hub.pgPool)
+	if rdb != nil && pool != nil {
+		ohlcStore = analytics.NewOHLCStore(rdb, pool)
 		hub.ohlcStore = ohlcStore
 	}
 
@@ -111,11 +117,12 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 				"close":         e.Close,
 				"timestamp":     e.Timestamp,
 			})
-			hub.Broadcast <- BroadcastEvent{
-				Room:    strconv.Itoa(e.InstrumentID),
-				Origin:  hub.InstanceID,
-				Message: Message{Type: "ohlc_update", Data: json.RawMessage(data)},
-			}
+			msg := Message{Type: "ohlc_update", Data: json.RawMessage(data)}
+			room := strconv.Itoa(e.InstrumentID)
+
+			hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+			hub.subManager.Fanout("ohlc:"+room, msg)
+
 			if ohlcStore != nil {
 				if err := ohlcStore.Write(context.Background(), e); err != nil {
 					log.Printf("OHLC write error (instrument %d): %v", e.InstrumentID, err)
@@ -124,15 +131,15 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		}
 	}()
 
-	// ---- EMA engine ----
+	// ---- EMA ----
 	ema := analytics.NewEMAEngine(20)
 	go ema.Run()
 	hub.emaEngine = ema
-	hub.registry.Register(ema) // register into feed path
+	hub.registry.Register(ema)
 
 	var emaStore *analytics.EMAStore
-	if hub.RedisClient != nil {
-		emaStore = analytics.NewEMAStore(hub.RedisClient, hub.pgPool)
+	if rdb != nil {
+		emaStore = analytics.NewEMAStore(rdb, pool)
 		hub.emaStore = emaStore
 	}
 
@@ -143,11 +150,11 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 			"timestamp":     e.Timestamp,
 			"resolution":    e.Resolution,
 		})
-		hub.Broadcast <- BroadcastEvent{
-			Room:    strconv.Itoa(e.InstrumentID),
-			Origin:  hub.InstanceID,
-			Message: Message{Type: "ema_update", Data: json.RawMessage(data)},
-		}
+		msg := Message{Type: "ema_update", Data: json.RawMessage(data)}
+		room := strconv.Itoa(e.InstrumentID)
+
+		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+		hub.subManager.Fanout("ema:"+room, msg)
 	}
 
 	go func() {
