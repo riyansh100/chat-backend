@@ -44,7 +44,6 @@ func main() {
 		feedSource = "binance"
 	}
 
-	// Worker now takes the registry — adding a new engine in future = zero changes here
 	bgWorker := background.NewWorker(feedSource, h.Registry())
 	go bgWorker.Start(ctx)
 	log.Printf("Background analytics worker started (source=%s)", feedSource)
@@ -59,6 +58,7 @@ func main() {
 		func() int { return h.SMAEngine().InputLen() },
 		func() int { return h.OHLCEngine().InputLen() },
 		func() int { return h.EMAEngine().InputLen() },
+		func() int { return h.BBEngine().InputLen() },
 	))
 
 	port := os.Getenv("PORT")
