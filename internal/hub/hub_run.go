@@ -79,29 +79,19 @@ func (h *Hub) Run() {
 						for _, res := range []struct {
 							resolution string
 							n          int
-						}{
-							{"1s", 1800},
-							{"1m", 60},
-						} {
+						}{{"1s", 1800}, {"1m", 60}} {
 							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
 							if err != nil || len(entries) == 0 {
 								continue
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{
-									"ts": int64(z.Score), "value": z.Member,
-								})
+								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
 							}
 							select {
 							case client.Send <- Message{
 								Type: "sma_history",
-								Data: map[string]interface{}{
-									"instrument_id": id,
-									"window":        20,
-									"resolution":    res.resolution,
-									"points":        points,
-								},
+								Data: map[string]interface{}{"instrument_id": id, "window": 20, "resolution": res.resolution, "points": points},
 							}:
 							default:
 							}
@@ -121,18 +111,12 @@ func (h *Hub) Run() {
 						}
 						candles := make([]map[string]interface{}, 0, len(entries))
 						for _, z := range entries {
-							candles = append(candles, map[string]interface{}{
-								"ts": int64(z.Score), "candle": z.Member,
-							})
+							candles = append(candles, map[string]interface{}{"ts": int64(z.Score), "candle": z.Member})
 						}
 						select {
 						case client.Send <- Message{
 							Type: "ohlc_history",
-							Data: map[string]interface{}{
-								"instrument_id": id,
-								"resolution":    "1m",
-								"candles":       candles,
-							},
+							Data: map[string]interface{}{"instrument_id": id, "resolution": "1m", "candles": candles},
 						}:
 						default:
 						}
@@ -148,29 +132,19 @@ func (h *Hub) Run() {
 						for _, res := range []struct {
 							resolution string
 							n          int
-						}{
-							{"1s", 1800},
-							{"1m", 60},
-						} {
+						}{{"1s", 1800}, {"1m", 60}} {
 							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
 							if err != nil || len(entries) == 0 {
 								continue
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{
-									"ts": int64(z.Score), "value": z.Member,
-								})
+								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
 							}
 							select {
 							case client.Send <- Message{
 								Type: "ema_history",
-								Data: map[string]interface{}{
-									"instrument_id": id,
-									"window":        20,
-									"resolution":    res.resolution,
-									"points":        points,
-								},
+								Data: map[string]interface{}{"instrument_id": id, "window": 20, "resolution": res.resolution, "points": points},
 							}:
 							default:
 							}
@@ -190,24 +164,74 @@ func (h *Hub) Run() {
 						}
 						candles := make([]map[string]interface{}, 0, len(entries))
 						for _, z := range entries {
-							candles = append(candles, map[string]interface{}{
-								"ts": int64(z.Score), "band": z.Member,
-							})
+							candles = append(candles, map[string]interface{}{"ts": int64(z.Score), "band": z.Member})
 						}
 						select {
 						case client.Send <- Message{
 							Type: "bb_history",
-							Data: map[string]interface{}{
-								"instrument_id": id,
-								"resolution":    "1m",
-								"window":        20,
-								"k":             2.0,
-								"bands":         candles,
-							},
+							Data: map[string]interface{}{"instrument_id": id, "resolution": "1m", "window": 20, "k": 2.0, "bands": candles},
 						}:
 						default:
 						}
 					}(event.Client, h.bbStore, instrumentID)
+				}
+			}
+
+			// ---------------- RSI HISTORY ----------------
+			if h.rsiStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, store *analytics.RSIStore, id int) {
+						for _, res := range []struct {
+							resolution string
+							n          int
+						}{{"1s", 1800}, {"1m", 60}} {
+							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
+							if err != nil || len(entries) == 0 {
+								continue
+							}
+							points := make([]map[string]interface{}, 0, len(entries))
+							for _, z := range entries {
+								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
+							}
+							select {
+							case client.Send <- Message{
+								Type: "rsi_history",
+								Data: map[string]interface{}{"instrument_id": id, "period": 14, "resolution": res.resolution, "points": points},
+							}:
+							default:
+							}
+						}
+					}(event.Client, h.rsiStore, instrumentID)
+				}
+			}
+
+			// ---------------- MACD HISTORY ----------------
+			if h.macdStore != nil {
+				instrumentID, err := strconv.Atoi(roomName)
+				if err == nil {
+					go func(client *Client, store *analytics.MACDStore, id int) {
+						for _, res := range []struct {
+							resolution string
+							n          int
+						}{{"1s", 1800}, {"1m", 60}} {
+							entries, err := store.GetLast(context.Background(), id, res.n, res.resolution)
+							if err != nil || len(entries) == 0 {
+								continue
+							}
+							points := make([]map[string]interface{}, 0, len(entries))
+							for _, z := range entries {
+								points = append(points, map[string]interface{}{"ts": int64(z.Score), "data": z.Member})
+							}
+							select {
+							case client.Send <- Message{
+								Type: "macd_history",
+								Data: map[string]interface{}{"instrument_id": id, "fast": 12, "slow": 26, "signal": 9, "resolution": res.resolution, "points": points},
+							}:
+							default:
+							}
+						}
+					}(event.Client, h.macdStore, instrumentID)
 				}
 			}
 
@@ -289,7 +313,6 @@ func (h *Hub) Run() {
 				}
 			}
 
-			// Redis pub/sub — only locally-originated events
 			if event.Origin == h.InstanceID {
 				rm := RedisMessage{
 					Room:   event.Room,
@@ -338,6 +361,14 @@ func (h *Hub) Run() {
 			}
 			select {
 			case h.bbEngine.Input() <- tick:
+			default:
+			}
+			select {
+			case h.rsiEngine.Input() <- tick:
+			default:
+			}
+			select {
+			case h.macdEngine.Input() <- tick:
 			default:
 			}
 		}
