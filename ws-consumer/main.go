@@ -38,7 +38,6 @@ func main() {
 		log.Println("Subscribed to instrument ID:", room)
 	}
 
-	// price bucket: track last printed time per instrument
 	lastPrinted := make(map[string]time.Time)
 
 	for {
@@ -49,30 +48,24 @@ func main() {
 		}
 
 		msgType, _ := msg["type"].(string)
+		dataBytes, _ := json.Marshal(msg["data"])
 
-		if msgType == "sma_update" {
+		switch msgType {
 
-			dataBytes, _ := json.Marshal(msg["data"])
-
-			var sma struct {
+		case "sma_update":
+			var d struct {
 				InstrumentID int     `json:"instrument_id"`
 				Value        float64 `json:"value"`
 				Timestamp    int64   `json:"timestamp"`
 				Resolution   string  `json:"resolution"`
 			}
-
-			if err := json.Unmarshal(dataBytes, &sma); err != nil {
-				log.Println("sma_update decode error:", err)
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
 				continue
 			}
+			log.Printf("📊 SMA [%s] (%d) = %.5f", d.Resolution, d.InstrumentID, d.Value)
 
-			log.Printf("📊 SMA [%s] (%d) = %.2f\n", sma.Resolution, sma.InstrumentID, sma.Value)
-
-		} else if msgType == "sma_history" {
-
-			dataBytes, _ := json.Marshal(msg["data"])
-
-			var history struct {
+		case "sma_history":
+			var d struct {
 				InstrumentID int    `json:"instrument_id"`
 				Resolution   string `json:"resolution"`
 				Points       []struct {
@@ -80,27 +73,47 @@ func main() {
 					Value string `json:"value"`
 				} `json:"points"`
 			}
-
-			if err := json.Unmarshal(dataBytes, &history); err != nil {
-				log.Println("sma_history decode error:", err)
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
 				continue
 			}
-
-			log.Printf("📈 SMA HISTORY [%s] instrument=%d points=%d\n",
-				history.Resolution, history.InstrumentID, len(history.Points))
-
-			if len(history.Points) > 0 {
-				first := history.Points[0]
-				last := history.Points[len(history.Points)-1]
-				log.Printf("   first: ts=%d value=%s\n", first.Ts, first.Value)
-				log.Printf("   last:  ts=%d value=%s\n", last.Ts, last.Value)
+			log.Printf("📈 SMA HISTORY [%s] instrument=%d points=%d", d.Resolution, d.InstrumentID, len(d.Points))
+			if len(d.Points) > 0 {
+				log.Printf("   first: ts=%d value=%s", d.Points[0].Ts, d.Points[0].Value)
+				log.Printf("   last:  ts=%d value=%s", d.Points[len(d.Points)-1].Ts, d.Points[len(d.Points)-1].Value)
 			}
 
-		} else if msgType == "ohlc_update" {
+		case "ema_update":
+			var d struct {
+				InstrumentID int     `json:"instrument_id"`
+				Value        float64 `json:"value"`
+				Timestamp    int64   `json:"timestamp"`
+				Resolution   string  `json:"resolution"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📉 EMA [%s] (%d) = %.5f", d.Resolution, d.InstrumentID, d.Value)
 
-			dataBytes, _ := json.Marshal(msg["data"])
+		case "ema_history":
+			var d struct {
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
+				Points       []struct {
+					Ts    int64  `json:"ts"`
+					Value string `json:"value"`
+				} `json:"points"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📉 EMA HISTORY [%s] instrument=%d points=%d", d.Resolution, d.InstrumentID, len(d.Points))
+			if len(d.Points) > 0 {
+				log.Printf("   first: ts=%d value=%s", d.Points[0].Ts, d.Points[0].Value)
+				log.Printf("   last:  ts=%d value=%s", d.Points[len(d.Points)-1].Ts, d.Points[len(d.Points)-1].Value)
+			}
 
-			var ohlc struct {
+		case "ohlc_update":
+			var d struct {
 				InstrumentID int     `json:"instrument_id"`
 				Resolution   string  `json:"resolution"`
 				Open         float64 `json:"open"`
@@ -109,21 +122,14 @@ func main() {
 				Close        float64 `json:"close"`
 				Timestamp    int64   `json:"timestamp"`
 			}
-
-			if err := json.Unmarshal(dataBytes, &ohlc); err != nil {
-				log.Println("ohlc_update decode error:", err)
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
 				continue
 			}
+			log.Printf("🕯️  OHLC [%s] (%d) O=%.2f H=%.2f L=%.2f C=%.2f",
+				d.Resolution, d.InstrumentID, d.Open, d.High, d.Low, d.Close)
 
-			log.Printf("🕯️  OHLC [%s] (%d) O=%.2f H=%.2f L=%.2f C=%.2f\n",
-				ohlc.Resolution, ohlc.InstrumentID,
-				ohlc.Open, ohlc.High, ohlc.Low, ohlc.Close)
-
-		} else if msgType == "ohlc_history" {
-
-			dataBytes, _ := json.Marshal(msg["data"])
-
-			var history struct {
+		case "ohlc_history":
+			var d struct {
 				InstrumentID int    `json:"instrument_id"`
 				Resolution   string `json:"resolution"`
 				Candles      []struct {
@@ -131,47 +137,126 @@ func main() {
 					Candle string `json:"candle"`
 				} `json:"candles"`
 			}
-
-			if err := json.Unmarshal(dataBytes, &history); err != nil {
-				log.Println("ohlc_history decode error:", err)
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
 				continue
 			}
-
-			log.Printf("🕯️  OHLC HISTORY [%s] instrument=%d candles=%d\n",
-				history.Resolution, history.InstrumentID, len(history.Candles))
-
-			if len(history.Candles) > 0 {
-				first := history.Candles[0]
-				last := history.Candles[len(history.Candles)-1]
-				log.Printf("   first: ts=%d\n", first.Ts)
-				log.Printf("   last:  ts=%d\n", last.Ts)
+			log.Printf("🕯️  OHLC HISTORY [%s] instrument=%d candles=%d", d.Resolution, d.InstrumentID, len(d.Candles))
+			if len(d.Candles) > 0 {
+				log.Printf("   first: ts=%d", d.Candles[0].Ts)
+				log.Printf("   last:  ts=%d", d.Candles[len(d.Candles)-1].Ts)
 			}
 
-		} else {
+		case "bb_update":
+			var d struct {
+				InstrumentID int     `json:"instrument_id"`
+				Upper        float64 `json:"upper"`
+				Middle       float64 `json:"middle"`
+				Lower        float64 `json:"lower"`
+				Resolution   string  `json:"resolution"`
+				Timestamp    int64   `json:"timestamp"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📐 BB [%s] (%d) U=%.5f M=%.5f L=%.5f", d.Resolution, d.InstrumentID, d.Upper, d.Middle, d.Lower)
 
-			dataBytes, _ := json.Marshal(msg["data"])
+		case "bb_history":
+			var d struct {
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
+				Bands        []struct {
+					Ts   int64  `json:"ts"`
+					Band string `json:"band"`
+				} `json:"bands"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📐 BB HISTORY [%s] instrument=%d bands=%d", d.Resolution, d.InstrumentID, len(d.Bands))
+			if len(d.Bands) > 0 {
+				log.Printf("   first: ts=%d", d.Bands[0].Ts)
+				log.Printf("   last:  ts=%d", d.Bands[len(d.Bands)-1].Ts)
+			}
 
+		case "rsi_update":
+			var d struct {
+				InstrumentID int     `json:"instrument_id"`
+				Value        float64 `json:"value"`
+				Resolution   string  `json:"resolution"`
+				Timestamp    int64   `json:"timestamp"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("💪 RSI [%s] (%d) = %.2f", d.Resolution, d.InstrumentID, d.Value)
+
+		case "rsi_history":
+			var d struct {
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
+				Points       []struct {
+					Ts    int64  `json:"ts"`
+					Value string `json:"value"`
+				} `json:"points"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("💪 RSI HISTORY [%s] instrument=%d points=%d", d.Resolution, d.InstrumentID, len(d.Points))
+			if len(d.Points) > 0 {
+				log.Printf("   first: ts=%d value=%s", d.Points[0].Ts, d.Points[0].Value)
+				log.Printf("   last:  ts=%d value=%s", d.Points[len(d.Points)-1].Ts, d.Points[len(d.Points)-1].Value)
+			}
+
+		case "macd_update":
+			var d struct {
+				InstrumentID int     `json:"instrument_id"`
+				MACDLine     float64 `json:"macd_line"`
+				SignalLine   float64 `json:"signal_line"`
+				Histogram    float64 `json:"histogram"`
+				Resolution   string  `json:"resolution"`
+				Timestamp    int64   `json:"timestamp"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📶 MACD [%s] (%d) line=%.5f signal=%.5f hist=%.5f",
+				d.Resolution, d.InstrumentID, d.MACDLine, d.SignalLine, d.Histogram)
+
+		case "macd_history":
+			var d struct {
+				InstrumentID int    `json:"instrument_id"`
+				Resolution   string `json:"resolution"`
+				Points       []struct {
+					Ts   int64  `json:"ts"`
+					Data string `json:"data"`
+				} `json:"points"`
+			}
+			if err := json.Unmarshal(dataBytes, &d); err != nil {
+				continue
+			}
+			log.Printf("📶 MACD HISTORY [%s] instrument=%d points=%d", d.Resolution, d.InstrumentID, len(d.Points))
+			if len(d.Points) > 0 {
+				log.Printf("   first: ts=%d", d.Points[0].Ts)
+				log.Printf("   last:  ts=%d", d.Points[len(d.Points)-1].Ts)
+			}
+
+		default:
 			var price struct {
 				Instrument string  `json:"instrument"`
 				Price      float64 `json:"price"`
 			}
-
 			json.Unmarshal(dataBytes, &price)
-
-			// only print once per second per instrument
 			if time.Since(lastPrinted[price.Instrument]) >= time.Second {
-				log.Printf("💰 PRICE %s = %.2f\n", price.Instrument, price.Price)
+				log.Printf("💰 PRICE %s = %.2f", price.Instrument, price.Price)
 				lastPrinted[price.Instrument] = time.Now()
 			}
 		}
 	}
 }
+
 func join(conn *websocket.Conn, room string) {
-	err := conn.WriteJSON(map[string]string{
-		"type": "join",
-		"room": room,
-	})
-	if err != nil {
+	if err := conn.WriteJSON(map[string]string{"type": "join", "room": room}); err != nil {
 		log.Fatal("join error:", err)
 	}
 }
