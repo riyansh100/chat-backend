@@ -64,7 +64,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		})
 		msg := Message{Type: "sma_update", Data: json.RawMessage(data)}
 		room := strconv.Itoa(e.InstrumentID)
-
 		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
 		hub.subManager.Fanout("sma:"+room, msg)
 	}
@@ -115,10 +114,8 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 			})
 			msg := Message{Type: "ohlc_update", Data: json.RawMessage(data)}
 			room := strconv.Itoa(e.InstrumentID)
-
 			hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
 			hub.subManager.Fanout("ohlc:"+room, msg)
-
 			if ohlcStore != nil {
 				if err := ohlcStore.Write(context.Background(), e); err != nil {
 					log.Printf("OHLC write error (instrument %d): %v", e.InstrumentID, err)
@@ -148,7 +145,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		})
 		msg := Message{Type: "ema_update", Data: json.RawMessage(data)}
 		room := strconv.Itoa(e.InstrumentID)
-
 		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
 		hub.subManager.Fanout("ema:"+room, msg)
 	}
@@ -198,10 +194,8 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 			})
 			msg := Message{Type: "bb_update", Data: json.RawMessage(data)}
 			room := strconv.Itoa(e.InstrumentID)
-
 			hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
 			hub.subManager.Fanout("bb:"+room, msg)
-
 			if bbStore != nil {
 				if err := bbStore.Write(context.Background(), e); err != nil {
 					log.Printf("BB write error (instrument %d): %v", e.InstrumentID, err)
@@ -209,5 +203,100 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 			}
 		}
 	}()
+
+	// ---- RSI ----
+	rsi := analytics.NewRSIEngine(14)
+	go rsi.Run()
+	hub.rsiEngine = rsi
+	hub.registry.Register(rsi)
+
+	var rsiStore *analytics.RSIStore
+	if rdb != nil {
+		rsiStore = analytics.NewRSIStore(rdb, pool)
+		hub.rsiStore = rsiStore
+	}
+
+	rsiToHub := func(e analytics.RSIUpdateEvent) {
+		data, _ := json.Marshal(map[string]interface{}{
+			"instrument_id": e.InstrumentID,
+			"value":         e.Value,
+			"timestamp":     e.Timestamp,
+			"resolution":    e.Resolution,
+		})
+		msg := Message{Type: "rsi_update", Data: json.RawMessage(data)}
+		room := strconv.Itoa(e.InstrumentID)
+		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+		hub.subManager.Fanout("rsi:"+room, msg)
+	}
+
+	go func() {
+		for e := range hub.rsiEngine.Output() {
+			rsiToHub(e)
+			if rsiStore != nil {
+				if err := rsiStore.Write(context.Background(), e); err != nil {
+					log.Printf("RSI 1s write error (instrument %d): %v", e.InstrumentID, err)
+				}
+			}
+		}
+	}()
+	go func() {
+		for e := range hub.rsiEngine.OutputMin() {
+			rsiToHub(e)
+			if rsiStore != nil {
+				if err := rsiStore.Write(context.Background(), e); err != nil {
+					log.Printf("RSI 1m write error (instrument %d): %v", e.InstrumentID, err)
+				}
+			}
+		}
+	}()
+
+	// ---- MACD ----
+	macd := analytics.NewMACDEngine(12, 26, 9)
+	go macd.Run()
+	hub.macdEngine = macd
+	hub.registry.Register(macd)
+
+	var macdStore *analytics.MACDStore
+	if rdb != nil {
+		macdStore = analytics.NewMACDStore(rdb, pool)
+		hub.macdStore = macdStore
+	}
+
+	macdToHub := func(e analytics.MACDUpdateEvent) {
+		data, _ := json.Marshal(map[string]interface{}{
+			"instrument_id": e.InstrumentID,
+			"macd_line":     e.MACDLine,
+			"signal_line":   e.SignalLine,
+			"histogram":     e.Histogram,
+			"timestamp":     e.Timestamp,
+			"resolution":    e.Resolution,
+		})
+		msg := Message{Type: "macd_update", Data: json.RawMessage(data)}
+		room := strconv.Itoa(e.InstrumentID)
+		hub.Broadcast <- BroadcastEvent{Room: room, Origin: hub.InstanceID, Message: msg}
+		hub.subManager.Fanout("macd:"+room, msg)
+	}
+
+	go func() {
+		for e := range hub.macdEngine.Output() {
+			macdToHub(e)
+			if macdStore != nil {
+				if err := macdStore.Write(context.Background(), e); err != nil {
+					log.Printf("MACD 1s write error (instrument %d): %v", e.InstrumentID, err)
+				}
+			}
+		}
+	}()
+	go func() {
+		for e := range hub.macdEngine.OutputMin() {
+			macdToHub(e)
+			if macdStore != nil {
+				if err := macdStore.Write(context.Background(), e); err != nil {
+					log.Printf("MACD 1m write error (instrument %d): %v", e.InstrumentID, err)
+				}
+			}
+		}
+	}()
+
 	return hub
 }
