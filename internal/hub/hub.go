@@ -39,6 +39,10 @@ type Hub struct {
 	emaStore   *analytics.EMAStore
 	bbEngine   *analytics.BBEngine
 	bbStore    *analytics.BBStore
+	rsiEngine  *analytics.RSIEngine
+	rsiStore   *analytics.RSIStore
+	macdEngine *analytics.MACDEngine
+	macdStore  *analytics.MACDStore
 }
 
 func (h *Hub) Registry() *analytics.Registry     { return h.registry }
@@ -46,4 +50,6 @@ func (h *Hub) SMAEngine() *analytics.Engine      { return h.smaEngine }
 func (h *Hub) OHLCEngine() *analytics.OHLCEngine { return h.ohlcEngine }
 func (h *Hub) EMAEngine() *analytics.EMAEngine   { return h.emaEngine }
 func (h *Hub) BBEngine() *analytics.BBEngine     { return h.bbEngine }
+func (h *Hub) RSIEngine() *analytics.RSIEngine   { return h.rsiEngine }
+func (h *Hub) MACDEngine() *analytics.MACDEngine { return h.macdEngine }
 func (h *Hub) SubManager() *SubscriptionManager  { return h.subManager }
