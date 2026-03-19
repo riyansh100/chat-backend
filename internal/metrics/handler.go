@@ -6,9 +6,7 @@ import (
 	"runtime"
 )
 
-// Snapshot holds a point-in-time reading of all system metrics.
 type Snapshot struct {
-	// Hub counters
 	EventsIngested    int64 `json:"events_ingested"`
 	EventsBroadcasted int64 `json:"events_broadcasted"`
 	MessagesDelivered int64 `json:"messages_delivered"`
@@ -16,20 +14,19 @@ type Snapshot struct {
 	ActiveClients     int64 `json:"active_clients"`
 	ActiveRooms       int64 `json:"active_rooms"`
 
-	// Engine health — how full are the input channels (cap=1024 each)
 	SMAInputLen  int `json:"sma_input_len"`
 	OHLCInputLen int `json:"ohlc_input_len"`
 	EMAInputLen  int `json:"ema_input_len"`
 	BBInputLen   int `json:"bb_input_len"`
+	RSIInputLen  int `json:"rsi_input_len"`
+	MACDInputLen int `json:"macd_input_len"`
 
-	// Go runtime
 	Goroutines int     `json:"goroutines"`
 	HeapMB     float64 `json:"heap_mb"`
 	SysMB      float64 `json:"sys_mb"`
 }
 
-// Handler returns an HTTP handler that serves a JSON metrics snapshot.
-func Handler(m *HubMetrics, smaLen func() int, ohlcLen func() int, emaLen func() int, bbLen func() int) http.HandlerFunc {
+func Handler(m *HubMetrics, smaLen, ohlcLen, emaLen, bbLen, rsiLen, macdLen func() int) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var mem runtime.MemStats
 		runtime.ReadMemStats(&mem)
@@ -46,6 +43,8 @@ func Handler(m *HubMetrics, smaLen func() int, ohlcLen func() int, emaLen func()
 			OHLCInputLen: ohlcLen(),
 			EMAInputLen:  emaLen(),
 			BBInputLen:   bbLen(),
+			RSIInputLen:  rsiLen(),
+			MACDInputLen: macdLen(),
 
 			Goroutines: runtime.NumGoroutine(),
 			HeapMB:     float64(mem.HeapAlloc) / 1024 / 1024,

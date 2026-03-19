@@ -59,6 +59,8 @@ func main() {
 		func() int { return h.OHLCEngine().InputLen() },
 		func() int { return h.EMAEngine().InputLen() },
 		func() int { return h.BBEngine().InputLen() },
+		func() int { return h.RSIEngine().InputLen() },
+		func() int { return h.MACDEngine().InputLen() },
 	))
 
 	port := os.Getenv("PORT")
