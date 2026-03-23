@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -20,7 +21,7 @@ const (
 // For multi-field indicators (MACD, BB, OHLC), Value is a JSON string.
 type Point struct {
 	Ts    int64  // unix seconds — used as score
-	Value string // float string for single-value indicators, JSON for multi-field
+	Value string // float string for scalar, JSON for multi-field
 }
 
 type Store struct {
@@ -44,7 +45,6 @@ func Key1h(indicator string, instrumentID int) string {
 
 // ---- write ----
 
-// Write1m stores a single 1m data point into Redis.
 func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1m(indicator, instrumentID)
 	err := s.rdb.ZAdd(ctx, key, redis.Z{
@@ -54,13 +54,11 @@ func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int,
 	if err != nil {
 		return err
 	}
-	// keep 48h of 1m data = 2880 entries max
 	s.rdb.ZRemRangeByRank(ctx, key, 0, -2881)
 	s.rdb.Expire(ctx, key, TTL1m)
 	return nil
 }
 
-// Write1h stores a single 1h rollup point into Redis.
 func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1h(indicator, instrumentID)
 	err := s.rdb.ZAdd(ctx, key, redis.Z{
@@ -70,7 +68,6 @@ func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int,
 	if err != nil {
 		return err
 	}
-	// keep 7d of 1h data = 168 entries max
 	s.rdb.ZRemRangeByRank(ctx, key, 0, -169)
 	s.rdb.Expire(ctx, key, TTL1h)
 	return nil
@@ -78,7 +75,6 @@ func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int,
 
 // ---- read ----
 
-// GetLastN fetches the most recent n points from a hist key.
 func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int, resolution string, n int) ([]Point, error) {
 	var key string
 	if resolution == "1h" {
@@ -102,7 +98,6 @@ func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int
 	return points, nil
 }
 
-// GetRange fetches points between fromUnix and toUnix (inclusive).
 func (s *Store) GetRange(ctx context.Context, indicator string, instrumentID int, resolution string, fromUnix, toUnix int64) ([]Point, error) {
 	var key string
 	if resolution == "1h" {
@@ -131,8 +126,6 @@ func (s *Store) GetRange(ctx context.Context, indicator string, instrumentID int
 
 // ---- Postgres fallback ----
 
-// FallbackFromPostgres fetches 1m data from Postgres when Redis misses.
-// Returns points as JSON-encoded rows.
 func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, instrumentID int, fromUnix, toUnix int64) ([]Point, error) {
 	if s.pool == nil {
 		return nil, fmt.Errorf("no postgres pool")
@@ -204,4 +197,40 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 		}
 	}
 	return points, nil
+}
+
+// BackfillRedis writes Postgres points back into Redis async so the next
+// request is served from cache. Runs in a goroutine — errors are logged only.
+func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution string, points []Point) {
+	ctx := context.Background()
+	var key string
+	var ttl time.Duration
+	var maxEntries int64
+
+	if resolution == "1h" {
+		key = Key1h(indicator, instrumentID)
+		ttl = TTL1h
+		maxEntries = 168
+	} else {
+		key = Key1m(indicator, instrumentID)
+		ttl = TTL1m
+		maxEntries = 2880
+	}
+
+	members := make([]redis.Z, 0, len(points))
+	for _, p := range points {
+		members = append(members, redis.Z{
+			Score:  float64(p.Ts),
+			Member: p.Value,
+		})
+	}
+
+	if err := s.rdb.ZAdd(ctx, key, members...).Err(); err != nil {
+		log.Printf("[BackfillRedis] %s:%d error: %v", indicator, instrumentID, err)
+		return
+	}
+
+	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxEntries-1)
+	s.rdb.Expire(ctx, key, ttl)
+	log.Printf("[BackfillRedis] %s:%d backfilled %d points into Redis", indicator, instrumentID, len(points))
 }

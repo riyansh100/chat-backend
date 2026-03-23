@@ -16,12 +16,21 @@ var validResolutions = map[string]bool{
 	"1m": true, "1h": true,
 }
 
+// expectedPoints returns the minimum points we expect Redis to have.
+// if Redis has less, we fall back to Postgres.
+func expectedPoints(hours int, resolution string) int {
+	if resolution == "1h" {
+		return hours
+	}
+	// 1m: 1 point/min, allow 20% buffer for gaps
+	return int(float64(hours*60) * 0.8)
+}
+
 // Handler serves GET /history?instrument=101&indicator=sma&hours=3&resolution=1m
 func Handler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 
-		// --- parse + validate params ---
 		instrumentStr := q.Get("instrument")
 		indicator := q.Get("indicator")
 		hoursStr := q.Get("hours")
@@ -51,31 +60,33 @@ func Handler(store *Store) http.HandlerFunc {
 			return
 		}
 
-		hours := 3 // default
+		hours := 3
 		if hoursStr != "" {
 			if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 && h <= 168 {
 				hours = h
 			}
 		}
 
-		// --- compute time range ---
 		now := time.Now().Unix()
 		fromUnix := now - int64(hours*3600)
-
-		// --- fetch from Redis ---
 		ctx := r.Context()
+
+		source := "redis"
+
+		// --- try Redis first ---
 		points, err := store.GetRange(ctx, indicator, instrumentID, resolution, fromUnix, now)
 
-		// --- fallback to Postgres if Redis miss ---
-		if err != nil || len(points) == 0 {
-			points, err = store.FallbackFromPostgres(ctx, indicator, instrumentID, fromUnix, now)
-			if err != nil {
-				http.Error(w, "data unavailable", http.StatusInternalServerError)
-				return
+		// --- fall back to Postgres if Redis is empty or insufficient ---
+		if err != nil || len(points) < expectedPoints(hours, resolution) {
+			pgPoints, pgErr := store.FallbackFromPostgres(ctx, indicator, instrumentID, fromUnix, now)
+			if pgErr == nil && len(pgPoints) > 0 {
+				points = pgPoints
+				source = "postgres"
+				// backfill Redis async so next request is fast
+				go store.BackfillRedis(indicator, instrumentID, resolution, pgPoints)
 			}
 		}
 
-		// --- respond ---
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"instrument": instrumentID,
@@ -85,6 +96,7 @@ func Handler(store *Store) http.HandlerFunc {
 			"from":       fromUnix,
 			"to":         now,
 			"count":      len(points),
+			"source":     source,
 			"points":     points,
 		})
 	}
