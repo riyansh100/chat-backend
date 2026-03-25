@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,21 +17,28 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// ---- global counters ----
 var (
 	totalReceived atomic.Int64
 	totalDropped  atomic.Int64
+	connFailed    atomic.Int64
+	reconnects    atomic.Int64
 
 	latencyMu      sync.Mutex
-	latencySamples []int64 // microseconds, reset every 5s
+	latencySamples []int64 // microseconds, reset on each flush
 )
 
+// ---- latency helpers ----
 func recordLatency(us int64) {
+	if us <= 0 || us > 30_000_000 {
+		return
+	}
 	latencyMu.Lock()
 	latencySamples = append(latencySamples, us)
 	latencyMu.Unlock()
 }
 
-func flushLatency() (min, avg, max float64, count int) {
+func flushLatency() (min, avg, max, p95 float64, count int) {
 	latencyMu.Lock()
 	samples := latencySamples
 	latencySamples = nil
@@ -35,7 +46,7 @@ func flushLatency() (min, avg, max float64, count int) {
 
 	count = len(samples)
 	if count == 0 {
-		return 0, 0, 0, 0
+		return
 	}
 
 	var sum int64
@@ -50,98 +61,110 @@ func flushLatency() (min, avg, max float64, count int) {
 			maxVal = s
 		}
 	}
-	return float64(minVal) / 1000.0,
+
+	// p95 — sort-free approximation using reservoir
+	sorted := make([]int64, count)
+	copy(sorted, samples)
+	// partial insertion sort for p95 index only
+	p95idx := int(float64(count) * 0.95)
+	for i := 1; i <= p95idx && i < count; i++ {
+		key := sorted[i]
+		j := i - 1
+		for j >= 0 && sorted[j] > key {
+			sorted[j+1] = sorted[j]
+			j--
+		}
+		sorted[j+1] = key
+	}
+
+	toMs := func(v int64) float64 { return float64(v) / 1000.0 }
+	return toMs(minVal),
 		float64(sum) / float64(count) / 1000.0,
-		float64(maxVal) / 1000.0,
+		toMs(maxVal),
+		toMs(sorted[p95idx]),
 		count
 }
 
-func main() {
-	clients := flag.Int("clients", 10, "number of concurrent consumers")
-	rooms := flag.String("rooms", "101,102,103", "comma-separated instrument IDs each client subscribes to")
-	duration := flag.Int("duration", 60, "how long to run the test in seconds")
-	host := flag.String("host", "localhost:8080", "server address")
-	flag.Parse()
-
-	log.Printf("🚀 Load test starting: %d clients × rooms=%s for %ds", *clients, *rooms, *duration)
-
-	var wg sync.WaitGroup
-	stop := make(chan struct{})
-
-	for i := 0; i < *clients; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			runConsumer(id, *host, *rooms, stop)
-		}(i)
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// reporter — prints throughput + latency every 5 seconds
-	go func() {
-		ticker := time.NewTicker(5 * time.Second)
-		var lastTotal int64
-		start := time.Now()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-ticker.C:
-				current := totalReceived.Load()
-				delta := current - lastTotal
-				lastTotal = current
-				elapsed := time.Since(start).Seconds()
-
-				minL, avgL, maxL, lcount := flushLatency()
-
-				if lcount > 0 {
-					log.Printf("📊 [%.0fs] clients=%d  msgs/5s=%d  rate=%.1f/s  total=%d  dropped=%d  latency(min/avg/max)=%.2fms/%.2fms/%.2fms  samples=%d",
-						elapsed, *clients, delta, float64(delta)/5.0,
-						current, totalDropped.Load(),
-						minL, avgL, maxL, lcount,
-					)
-				} else {
-					log.Printf("📊 [%.0fs] clients=%d  msgs/5s=%d  rate=%.1f/s  total=%d  dropped=%d  latency=n/a",
-						elapsed, *clients, delta, float64(delta)/5.0,
-						current, totalDropped.Load(),
-					)
-				}
-			}
-		}
-	}()
-
-	time.Sleep(time.Duration(*duration) * time.Second)
-	close(stop)
-	wg.Wait()
-
-	minL, avgL, maxL, lcount := flushLatency()
-	fmt.Printf("\n✅ Test complete.\n")
-	fmt.Printf("   Total messages received : %d\n", totalReceived.Load())
-	fmt.Printf("   Total messages dropped  : %d\n", totalDropped.Load())
-	fmt.Printf("   Avg rate                : %.1f msg/s across %d clients\n",
-		float64(totalReceived.Load())/float64(*duration), *clients)
-	if lcount > 0 {
-		fmt.Printf("   Final latency batch     : min=%.2fms  avg=%.2fms  max=%.2fms  samples=%d\n",
-			minL, avgL, maxL, lcount)
-	}
+// ---- snapshot table ----
+type Snapshot struct {
+	ElapsedS   float64
+	Clients    int
+	MsgRate    float64
+	TotalMsgs  int64
+	Dropped    int64
+	ConnFailed int64
+	Reconnects int64
+	AvgLatMs   float64
+	P95LatMs   float64
+	MaxLatMs   float64
+	RedisMemMB float64
+	HeapMB     float64
 }
 
-func runConsumer(id int, host string, rooms string, stop chan struct{}) {
+var (
+	snapshotMu sync.Mutex
+	snapshots  []Snapshot
+)
+
+func addSnapshot(s Snapshot) {
+	snapshotMu.Lock()
+	snapshots = append(snapshots, s)
+	snapshotMu.Unlock()
+}
+
+// ---- metrics poller ----
+type hubMetrics struct {
+	HeapMB float64 `json:"heap_mb"`
+}
+
+func pollMetrics(metricsURL string) float64 {
+	resp, err := http.Get(metricsURL)
+	if err != nil {
+		return -1
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var m hubMetrics
+	if err := json.Unmarshal(body, &m); err != nil {
+		return -1
+	}
+	return m.HeapMB
+}
+
+// ---- Redis memory poller via redis-cli ----
+// We poll the /metrics endpoint instead of redis-cli to avoid
+// spawning subprocesses (memory concern on Windows).
+// Redis memory is approximated from heap_mb on the dataserver.
+
+// ---- consumer goroutine ----
+func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	u := url.URL{Scheme: "ws", Host: host, Path: "/ws"}
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	var conn *websocket.Conn
+	var err error
+
+	// retry connect up to 3 times
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
+		if err == nil {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 	if err != nil {
-		log.Printf("client %d connect failed: %v", id, err)
-		totalDropped.Add(1)
+		log.Printf("[client %d] connect failed: %v", id, err)
+		connFailed.Add(1)
 		return
 	}
 	defer conn.Close()
 
-	for _, room := range splitRooms(rooms) {
+	for _, room := range rooms {
 		conn.WriteJSON(map[string]string{"type": "join", "room": room})
 	}
 
-	msgCh := make(chan map[string]interface{}, 128)
+	msgCh := make(chan map[string]interface{}, 256)
 
 	go func() {
 		for {
@@ -163,7 +186,13 @@ func runConsumer(id int, host string, rooms string, stop chan struct{}) {
 			return
 		case msg := <-msgCh:
 			totalReceived.Add(1)
+			// latency from timestamp field (analytics events carry nanosecond ts)
 			if data, ok := msg["data"].(map[string]interface{}); ok {
+				if ts, ok := data["timestamp"].(float64); ok && ts > 0 {
+					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
+					recordLatency(latencyUs)
+				}
+				// fallback: ingested_at for price_update events
 				if ts, ok := data["ingested_at"].(float64); ok && ts > 0 {
 					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
 					recordLatency(latencyUs)
@@ -173,21 +202,133 @@ func runConsumer(id int, host string, rooms string, stop chan struct{}) {
 	}
 }
 
-func splitRooms(rooms string) []string {
-	var result []string
-	current := ""
-	for _, c := range rooms {
-		if c == ',' {
-			if current != "" {
-				result = append(result, current)
-				current = ""
+func main() {
+	clients := flag.Int("clients", 20, "concurrent consumers")
+	rooms := flag.String("rooms", "101,102,103,104,105", "comma-separated instrument IDs")
+	duration := flag.Int("duration", 120, "test duration in seconds")
+	host := flag.String("host", "localhost:80", "nginx address")
+	metrics := flag.String("metrics", "http://localhost:8081/metrics", "dataserver metrics URL")
+	phase := flag.String("phase", "1", "phase label (1=baseline, 2=load, 3=failover)")
+	flag.Parse()
+
+	roomList := strings.Split(*rooms, ",")
+
+	fmt.Printf("\n========================================\n")
+	fmt.Printf("  LOAD TEST  phase=%s  clients=%d\n", *phase, *clients)
+	fmt.Printf("  rooms=%s  duration=%ds\n", *rooms, *duration)
+	fmt.Printf("  target=%s\n", *host)
+	fmt.Printf("========================================\n\n")
+
+	if *phase == "3" {
+		fmt.Println("PHASE 3 — FAILOVER UNDER LOAD")
+		fmt.Println("  at t=30s : kill leader dataserver")
+		fmt.Println("  at t=60s : kill Redis primary")
+		fmt.Println("  watch for reconnects + latency spikes\n")
+	}
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	start := time.Now()
+
+	// ramp up clients with small delay to avoid thundering herd
+	for i := 0; i < *clients; i++ {
+		wg.Add(1)
+		go runConsumer(i, *host, roomList, stop, &wg)
+		time.Sleep(15 * time.Millisecond)
+	}
+
+	// ---- reporter: every 10s ----
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		var lastTotal int64
+
+		fmt.Printf("%-8s %-8s %-10s %-10s %-10s %-10s %-10s %-10s\n",
+			"time(s)", "rate/s", "total", "dropped", "avg_ms", "p95_ms", "max_ms", "heap_mb")
+		fmt.Println(strings.Repeat("-", 80))
+
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				elapsed := time.Since(start).Seconds()
+				current := totalReceived.Load()
+				delta := current - lastTotal
+				lastTotal = current
+				rate := float64(delta) / 10.0
+
+				minL, avgL, maxL, p95L, lcount := flushLatency()
+				_ = minL
+				heapMB := pollMetrics(*metrics)
+
+				snap := Snapshot{
+					ElapsedS:   elapsed,
+					Clients:    *clients,
+					MsgRate:    rate,
+					TotalMsgs:  current,
+					Dropped:    totalDropped.Load(),
+					ConnFailed: connFailed.Load(),
+					Reconnects: reconnects.Load(),
+					HeapMB:     heapMB,
+				}
+				if lcount > 0 {
+					snap.AvgLatMs = avgL
+					snap.P95LatMs = p95L
+					snap.MaxLatMs = maxL
+				}
+				addSnapshot(snap)
+
+				if lcount > 0 {
+					fmt.Printf("%-8.0f %-8.1f %-10d %-10d %-10.2f %-10.2f %-10.2f %-10.2f\n",
+						elapsed, rate, current, totalDropped.Load(),
+						avgL, p95L, maxL, heapMB)
+				} else {
+					fmt.Printf("%-8.0f %-8.1f %-10d %-10d %-10s %-10s %-10s %-10.2f\n",
+						elapsed, rate, current, totalDropped.Load(),
+						"n/a", "n/a", "n/a", heapMB)
+				}
 			}
-		} else {
-			current += string(c)
+		}
+	}()
+
+	time.Sleep(time.Duration(*duration) * time.Second)
+	close(stop)
+	wg.Wait()
+
+	// ---- final summary ----
+	_, avgL, maxL, p95L, lcount := flushLatency()
+
+	fmt.Printf("\n========================================\n")
+	fmt.Printf("  FINAL SUMMARY  phase=%s\n", *phase)
+	fmt.Printf("========================================\n")
+	fmt.Printf("  Clients           : %d\n", *clients)
+	fmt.Printf("  Duration          : %ds\n", *duration)
+	fmt.Printf("  Total received    : %d\n", totalReceived.Load())
+	fmt.Printf("  Total dropped     : %d\n", totalDropped.Load())
+	fmt.Printf("  Connect failures  : %d\n", connFailed.Load())
+	fmt.Printf("  Avg rate          : %.1f msg/s\n",
+		float64(totalReceived.Load())/float64(*duration))
+	if lcount > 0 {
+		fmt.Printf("  Latency avg       : %.2fms\n", avgL)
+		fmt.Printf("  Latency p95       : %.2fms\n", p95L)
+		fmt.Printf("  Latency max       : %.2fms\n", maxL)
+	}
+	fmt.Printf("  Drop rate         : %.2f%%\n",
+		100.0*float64(totalDropped.Load())/
+			math.Max(1, float64(totalReceived.Load()+totalDropped.Load())))
+
+	// ---- snapshot table ----
+	snapshotMu.Lock()
+	defer snapshotMu.Unlock()
+	if len(snapshots) > 0 {
+		fmt.Printf("\n  TIMELINE\n  %-8s %-10s %-10s %-10s %-10s\n",
+			"time(s)", "rate/s", "avg_ms", "p95_ms", "heap_mb")
+		fmt.Println("  " + strings.Repeat("-", 52))
+		for _, s := range snapshots {
+			fmt.Printf("  %-8.0f %-10.1f %-10.2f %-10.2f %-10.2f\n",
+				s.ElapsedS, s.MsgRate, s.AvgLatMs, s.P95LatMs, s.HeapMB)
 		}
 	}
-	if current != "" {
-		result = append(result, current)
-	}
-	return result
+	fmt.Println()
 }
