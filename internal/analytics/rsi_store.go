@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
 const (
@@ -16,21 +17,17 @@ const (
 )
 
 type RSIStore struct {
-	rdb  *redis.Client
-	pool *pgxpool.Pool
+	rdb     *redis.Client
+	readRDB *chatredis.SafeReadClient
+	pool    *pgxpool.Pool
 }
 
-func NewRSIStore(rdb *redis.Client, pool *pgxpool.Pool) *RSIStore {
-	return &RSIStore{rdb: rdb, pool: pool}
+func NewRSIStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *RSIStore {
+	return &RSIStore{rdb: rdb, readRDB: readRDB, pool: pool}
 }
 
-func rsiKey1s(instrumentID int) string {
-	return fmt.Sprintf("rsi:1s:%d", instrumentID)
-}
-
-func rsiKey1m(instrumentID int) string {
-	return fmt.Sprintf("rsi:1m:%d", instrumentID)
-}
+func rsiKey1s(instrumentID int) string { return fmt.Sprintf("rsi:1s:%d", instrumentID) }
+func rsiKey1m(instrumentID int) string { return fmt.Sprintf("rsi:1m:%d", instrumentID) }
 
 func (s *RSIStore) Write(ctx context.Context, event RSIUpdateEvent) error {
 	if err := s.writeRedis(ctx, event); err != nil {
@@ -47,7 +44,6 @@ func (s *RSIStore) Write(ctx context.Context, event RSIUpdateEvent) error {
 func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 	var k string
 	var maxEntries int64
-
 	switch event.Resolution {
 	case "1m":
 		k = rsiKey1m(event.InstrumentID)
@@ -56,9 +52,7 @@ func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 		k = rsiKey1s(event.InstrumentID)
 		maxEntries = maxRSIEntries1s
 	}
-
 	ts := time.Now().Unix()
-
 	err := s.rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
 		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
@@ -66,7 +60,6 @@ func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 	if err != nil {
 		return err
 	}
-
 	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
@@ -74,12 +67,8 @@ func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 func (s *RSIStore) writePostgres(ctx context.Context, event RSIUpdateEvent) error {
 	t := time.Unix(0, event.Timestamp).UTC()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO rsi (time, instrument, resolution, value)
-		 VALUES ($1, $2, $3, $4)`,
-		t,
-		event.InstrumentID,
-		event.Resolution,
-		event.Value,
+		`INSERT INTO rsi (time, instrument, resolution, value) VALUES ($1, $2, $3, $4)`,
+		t, event.InstrumentID, event.Resolution, event.Value,
 	)
 	return err
 }
@@ -91,7 +80,7 @@ func (s *RSIStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	} else {
 		k = rsiKey1s(instrumentID)
 	}
-	return s.rdb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
 func (s *RSIStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
@@ -101,7 +90,7 @@ func (s *RSIStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toU
 	} else {
 		k = rsiKey1s(instrumentID)
 	}
-	return s.rdb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
