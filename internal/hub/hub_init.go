@@ -29,7 +29,8 @@ func publish(ctx context.Context, rdb *goredis.Client, ev analyticsEvent) {
 }
 
 // NewHub creates a full hub with all engines running (data server mode).
-func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool *pgxpool.Pool) *Hub {
+// rdb = write client (primary via sentinel), readRDB = read client (replica w/ fallback).
+func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, readRDB *redis.SafeReadClient, pool *pgxpool.Pool) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -44,6 +45,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
+		readRDB:     readRDB,
 		pgPool:      pool,
 		Metrics:     m,
 		Register:    make(chan *Client),
@@ -58,7 +60,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.subManager = NewSubscriptionManager()
 	hub.registry = analytics.NewRegistry()
 
-	histStore := history.NewStore(rdb, pool)
+	histStore := history.NewStore(rdb, readRDB, pool)
 
 	// ---- SMA ----
 	sma := analytics.NewEngine(20)
@@ -66,15 +68,13 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.smaEngine = sma
 	hub.registry.Register(sma)
 
-	smaStore := analytics.NewSMAStore(rdb, pool)
+	smaStore := analytics.NewSMAStore(rdb, readRDB, pool)
 	hub.smaStore = smaStore
 
 	smaToHub := func(e analytics.SMAUpdateEvent) {
 		data, _ := json.Marshal(map[string]interface{}{
-			"instrument_id": e.InstrumentID,
-			"value":         e.Value,
-			"timestamp":     e.Timestamp,
-			"resolution":    e.Resolution,
+			"instrument_id": e.InstrumentID, "value": e.Value,
+			"timestamp": e.Timestamp, "resolution": e.Resolution,
 		})
 		room := strconv.Itoa(e.InstrumentID)
 		publish(context.Background(), rdb, analyticsEvent{
@@ -108,7 +108,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.ohlcEngine = ohlc
 	hub.registry.Register(ohlc)
 
-	ohlcStore := analytics.NewOHLCStore(rdb, pool)
+	ohlcStore := analytics.NewOHLCStore(rdb, readRDB, pool)
 	hub.ohlcStore = ohlcStore
 
 	go func() {
@@ -139,7 +139,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.emaEngine = ema
 	hub.registry.Register(ema)
 
-	emaStore := analytics.NewEMAStore(rdb, pool)
+	emaStore := analytics.NewEMAStore(rdb, readRDB, pool)
 	hub.emaStore = emaStore
 
 	emaToHub := func(e analytics.EMAUpdateEvent) {
@@ -179,7 +179,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.bbEngine = bb
 	hub.registry.Register(bb)
 
-	bbStore := analytics.NewBBStore(rdb, pool)
+	bbStore := analytics.NewBBStore(rdb, readRDB, pool)
 	hub.bbStore = bbStore
 
 	go func() {
@@ -210,7 +210,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.rsiEngine = rsi
 	hub.registry.Register(rsi)
 
-	rsiStore := analytics.NewRSIStore(rdb, pool)
+	rsiStore := analytics.NewRSIStore(rdb, readRDB, pool)
 	hub.rsiStore = rsiStore
 
 	rsiToHub := func(e analytics.RSIUpdateEvent) {
@@ -250,7 +250,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 	hub.macdEngine = macd
 	hub.registry.Register(macd)
 
-	macdStore := analytics.NewMACDStore(rdb, pool)
+	macdStore := analytics.NewMACDStore(rdb, readRDB, pool)
 	hub.macdStore = macdStore
 
 	macdToHub := func(e analytics.MACDUpdateEvent) {
@@ -291,8 +291,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool
 }
 
 // NewClientHub creates a hub with NO engines — client server mode.
-// Receives updates via analytics:events Redis channel from the data server.
-func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, pool *pgxpool.Pool) *Hub {
+func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, readRDB *redis.SafeReadClient, pool *pgxpool.Pool) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -307,6 +306,7 @@ func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
+		readRDB:     readRDB,
 		pgPool:      pool,
 		Metrics:     m,
 		Register:    make(chan *Client),
