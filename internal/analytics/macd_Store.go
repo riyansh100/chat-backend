@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
 const (
@@ -17,21 +18,17 @@ const (
 )
 
 type MACDStore struct {
-	rdb  *redis.Client
-	pool *pgxpool.Pool
+	rdb     *redis.Client
+	readRDB *chatredis.SafeReadClient
+	pool    *pgxpool.Pool
 }
 
-func NewMACDStore(rdb *redis.Client, pool *pgxpool.Pool) *MACDStore {
-	return &MACDStore{rdb: rdb, pool: pool}
+func NewMACDStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *MACDStore {
+	return &MACDStore{rdb: rdb, readRDB: readRDB, pool: pool}
 }
 
-func macdKey1s(instrumentID int) string {
-	return fmt.Sprintf("macd:1s:%d", instrumentID)
-}
-
-func macdKey1m(instrumentID int) string {
-	return fmt.Sprintf("macd:1m:%d", instrumentID)
-}
+func macdKey1s(instrumentID int) string { return fmt.Sprintf("macd:1s:%d", instrumentID) }
+func macdKey1m(instrumentID int) string { return fmt.Sprintf("macd:1m:%d", instrumentID) }
 
 func (s *MACDStore) Write(ctx context.Context, event MACDUpdateEvent) error {
 	if err := s.writeRedis(ctx, event); err != nil {
@@ -48,7 +45,6 @@ func (s *MACDStore) Write(ctx context.Context, event MACDUpdateEvent) error {
 func (s *MACDStore) writeRedis(ctx context.Context, event MACDUpdateEvent) error {
 	var k string
 	var maxEntries int64
-
 	switch event.Resolution {
 	case "1m":
 		k = macdKey1m(event.InstrumentID)
@@ -57,27 +53,18 @@ func (s *MACDStore) writeRedis(ctx context.Context, event MACDUpdateEvent) error
 		k = macdKey1s(event.InstrumentID)
 		maxEntries = maxMACDEntries1s
 	}
-
 	payload, err := json.Marshal(map[string]interface{}{
-		"macd_line":   event.MACDLine,
-		"signal_line": event.SignalLine,
-		"histogram":   event.Histogram,
-		"ts":          event.Timestamp,
+		"macd_line": event.MACDLine, "signal_line": event.SignalLine,
+		"histogram": event.Histogram, "ts": event.Timestamp,
 	})
 	if err != nil {
 		return err
 	}
-
 	ts := time.Now().Unix()
-
-	err = s.rdb.ZAdd(ctx, k, redis.Z{
-		Score:  float64(ts),
-		Member: string(payload),
-	}).Err()
+	err = s.rdb.ZAdd(ctx, k, redis.Z{Score: float64(ts), Member: string(payload)}).Err()
 	if err != nil {
 		return err
 	}
-
 	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
@@ -85,14 +72,8 @@ func (s *MACDStore) writeRedis(ctx context.Context, event MACDUpdateEvent) error
 func (s *MACDStore) writePostgres(ctx context.Context, event MACDUpdateEvent) error {
 	t := time.Unix(0, event.Timestamp).UTC()
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO macd (time, instrument, resolution, macd_line, signal_line, histogram)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		t,
-		event.InstrumentID,
-		event.Resolution,
-		event.MACDLine,
-		event.SignalLine,
-		event.Histogram,
+		`INSERT INTO macd (time, instrument, resolution, macd_line, signal_line, histogram) VALUES ($1, $2, $3, $4, $5, $6)`,
+		t, event.InstrumentID, event.Resolution, event.MACDLine, event.SignalLine, event.Histogram,
 	)
 	return err
 }
@@ -104,7 +85,7 @@ func (s *MACDStore) GetLast(ctx context.Context, instrumentID int, n int, resolu
 	} else {
 		k = macdKey1s(instrumentID)
 	}
-	return s.rdb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
 func (s *MACDStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
@@ -114,7 +95,7 @@ func (s *MACDStore) GetRange(ctx context.Context, instrumentID int, fromUnix, to
 	} else {
 		k = macdKey1s(instrumentID)
 	}
-	return s.rdb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
