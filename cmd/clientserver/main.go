@@ -22,17 +22,29 @@ func main() {
 	instanceID := uuid.NewString()
 	log.Println("[ClientServer] instanceID:", instanceID)
 
-	// Sentinel-aware client — follows primary on failover automatically
+	// write client — primary via sentinel
 	rdb := chatredis.NewSentinelClient()
 	defer rdb.Close()
 
+	// read client — replica direct, falls back to primary on error
+	replicaRDB := chatredis.NewReplicaClient()
+	defer replicaRDB.Close()
+
+	readRDB := chatredis.NewSafeReadClient(replicaRDB, rdb)
+
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("[ClientServer] Redis sentinel ping failed:", err)
+		log.Fatal("[ClientServer] Redis primary ping failed:", err)
 	}
-	log.Println("[ClientServer] Redis (sentinel) connected")
+	log.Println("[ClientServer] Redis primary (write) connected")
 
-	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
+	if err := replicaRDB.Ping(ctx).Err(); err != nil {
+		log.Printf("[ClientServer] Redis replica ping failed (%v) — reads will fall back to primary", err)
+	} else {
+		log.Println("[ClientServer] Redis replica (read) connected")
+	}
+
+	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	pool, err := pgxpool.New(ctx, pgConnStr)
@@ -42,7 +54,7 @@ func main() {
 	defer pool.Close()
 	log.Println("[ClientServer] Postgres connected")
 
-	h := hub.NewClientHub(instanceID, redisCache, rdb, pool)
+	h := hub.NewClientHub(instanceID, redisCache, rdb, readRDB, pool)
 
 	go subscribeAnalyticsEvents(ctx, rdb, h)
 	hub.StartRedisSubscriber(ctx, rdb, h)
@@ -50,7 +62,7 @@ func main() {
 	go h.Run()
 	log.Println("[ClientServer] hub running (no engines)")
 
-	histStore := history.NewStore(rdb, pool)
+	histStore := history.NewStore(rdb, readRDB, pool)
 	http.HandleFunc("/history", history.Handler(histStore))
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
