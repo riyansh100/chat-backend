@@ -11,7 +11,8 @@ import (
 
 type Hub struct {
 	Rooms       map[string]*Room
-	RedisClient *goredis.Client
+	RedisClient *goredis.Client           // write client (primary via sentinel)
+	readRDB     *chatredis.SafeReadClient // read client (replica w/ fallback)
 	pgPool      *pgxpool.Pool
 
 	Register   chan *Client
