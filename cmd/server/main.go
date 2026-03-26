@@ -24,6 +24,7 @@ func main() {
 
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6380"})
 	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
+	safeReadClient := chatredis.NewSafeReadClient(rdb, rdb)
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	pool, err := pgxpool.New(context.Background(), pgConnStr)
@@ -33,7 +34,7 @@ func main() {
 	defer pool.Close()
 	log.Println("Postgres connected")
 
-	h := hub.NewHub(instanceID, redisCache, rdb, pool)
+	h := hub.NewHub(instanceID, redisCache, rdb, safeReadClient, pool)
 
 	ctx := context.Background()
 	hub.StartRedisSubscriber(ctx, rdb, h)
