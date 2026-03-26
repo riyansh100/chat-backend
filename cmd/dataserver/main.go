@@ -22,19 +22,29 @@ func main() {
 	instanceID := uuid.NewString()
 	log.Println("[DataServer] instanceID:", instanceID)
 
-	// Sentinel-aware client — automatically follows primary after failover.
-	// If primary dies and sentinel promotes the replica, go-redis transparently
-	// reconnects to the new primary. Zero code changes needed on failover.
+	// write client — primary via sentinel, auto-follows on failover
 	rdb := chatredis.NewSentinelClient()
 	defer rdb.Close()
 
+	// read client — replica direct, falls back to primary on error
+	replicaRDB := chatredis.NewReplicaClient()
+	defer replicaRDB.Close()
+
+	readRDB := chatredis.NewSafeReadClient(replicaRDB, rdb)
+
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("[DataServer] Redis sentinel ping failed:", err)
+		log.Fatal("[DataServer] Redis primary ping failed:", err)
 	}
-	log.Println("[DataServer] Redis (sentinel) connected")
+	log.Println("[DataServer] Redis primary (write) connected")
 
-	redisCache := chatredis.NewRedisCache(rdb, 30*time.Second)
+	if err := replicaRDB.Ping(ctx).Err(); err != nil {
+		log.Printf("[DataServer] Redis replica ping failed (%v) — reads will fall back to primary", err)
+	} else {
+		log.Println("[DataServer] Redis replica (read) connected")
+	}
+
+	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	pool, err := pgxpool.New(ctx, pgConnStr)
@@ -82,7 +92,7 @@ func main() {
 		func(leaderCtx context.Context) {
 			log.Println("[DataServer] elected as leader — starting engines")
 
-			h := hub.NewHub(instanceID, redisCache, rdb, pool)
+			h := hub.NewHub(instanceID, redisCache, rdb, readRDB, pool)
 			hubRef = h
 
 			go h.Run()
@@ -96,7 +106,7 @@ func main() {
 			go bgWorker.Start(leaderCtx)
 			log.Printf("[DataServer] analytics worker started (source=%s)", feedSource)
 
-			histStore := history.NewStore(rdb, pool)
+			histStore := history.NewStore(rdb, readRDB, pool)
 			go history.StartRollupJob(leaderCtx, histStore)
 			log.Println("[DataServer] hourly rollup job started")
 
