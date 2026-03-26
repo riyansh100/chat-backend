@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
 const (
@@ -25,12 +26,13 @@ type Point struct {
 }
 
 type Store struct {
-	rdb  *redis.Client
-	pool *pgxpool.Pool
+	rdb     *redis.Client             // write client — primary via sentinel
+	readRDB *chatredis.SafeReadClient // read client — replica w/ fallback
+	pool    *pgxpool.Pool
 }
 
-func NewStore(rdb *redis.Client, pool *pgxpool.Pool) *Store {
-	return &Store{rdb: rdb, pool: pool}
+func NewStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *Store {
+	return &Store{rdb: rdb, readRDB: readRDB, pool: pool}
 }
 
 // ---- key helpers ----
@@ -43,14 +45,11 @@ func Key1h(indicator string, instrumentID int) string {
 	return fmt.Sprintf("hist:1h:%s:%d", indicator, instrumentID)
 }
 
-// ---- write ----
+// ---- write (primary) ----
 
 func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1m(indicator, instrumentID)
-	err := s.rdb.ZAdd(ctx, key, redis.Z{
-		Score:  float64(ts),
-		Member: value,
-	}).Err()
+	err := s.rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err()
 	if err != nil {
 		return err
 	}
@@ -61,10 +60,7 @@ func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int,
 
 func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1h(indicator, instrumentID)
-	err := s.rdb.ZAdd(ctx, key, redis.Z{
-		Score:  float64(ts),
-		Member: value,
-	}).Err()
+	err := s.rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err()
 	if err != nil {
 		return err
 	}
@@ -73,7 +69,7 @@ func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int,
 	return nil
 }
 
-// ---- read ----
+// ---- read (replica w/ fallback) ----
 
 func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int, resolution string, n int) ([]Point, error) {
 	var key string
@@ -82,18 +78,13 @@ func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int
 	} else {
 		key = Key1m(indicator, instrumentID)
 	}
-
-	zs, err := s.rdb.ZRangeWithScores(ctx, key, int64(-n), -1).Result()
+	zs, err := s.readRDB.ZRangeWithScores(ctx, key, int64(-n), -1).Result()
 	if err != nil {
 		return nil, err
 	}
-
 	points := make([]Point, 0, len(zs))
 	for _, z := range zs {
-		points = append(points, Point{
-			Ts:    int64(z.Score),
-			Value: fmt.Sprintf("%v", z.Member),
-		})
+		points = append(points, Point{Ts: int64(z.Score), Value: fmt.Sprintf("%v", z.Member)})
 	}
 	return points, nil
 }
@@ -105,21 +96,16 @@ func (s *Store) GetRange(ctx context.Context, indicator string, instrumentID int
 	} else {
 		key = Key1m(indicator, instrumentID)
 	}
-
-	zs, err := s.rdb.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+	zs, err := s.readRDB.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
 	if err != nil {
 		return nil, err
 	}
-
 	points := make([]Point, 0, len(zs))
 	for _, z := range zs {
-		points = append(points, Point{
-			Ts:    int64(z.Score),
-			Value: fmt.Sprintf("%v", z.Member),
-		})
+		points = append(points, Point{Ts: int64(z.Score), Value: fmt.Sprintf("%v", z.Member)})
 	}
 	return points, nil
 }
@@ -130,7 +116,6 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 	if s.pool == nil {
 		return nil, fmt.Errorf("no postgres pool")
 	}
-
 	from := time.Unix(fromUnix, 0).UTC()
 	to := time.Unix(toUnix, 0).UTC()
 
@@ -139,20 +124,16 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 	case "sma", "ema", "rsi":
 		query = fmt.Sprintf(
 			`SELECT EXTRACT(EPOCH FROM time)::bigint, value FROM %s
-			 WHERE instrument=$1 AND time >= $2 AND time <= $3
-			 ORDER BY time ASC`, indicator)
+			 WHERE instrument=$1 AND time >= $2 AND time <= $3 ORDER BY time ASC`, indicator)
 	case "macd":
 		query = `SELECT EXTRACT(EPOCH FROM time)::bigint, macd_line, signal_line, histogram FROM macd
-			 WHERE instrument=$1 AND time >= $2 AND time <= $3
-			 ORDER BY time ASC`
+			 WHERE instrument=$1 AND time >= $2 AND time <= $3 ORDER BY time ASC`
 	case "bb":
 		query = `SELECT EXTRACT(EPOCH FROM time)::bigint, upper, middle, lower FROM bb
-			 WHERE instrument=$1 AND time >= $2 AND time <= $3
-			 ORDER BY time ASC`
+			 WHERE instrument=$1 AND time >= $2 AND time <= $3 ORDER BY time ASC`
 	case "ohlc":
 		query = `SELECT EXTRACT(EPOCH FROM time)::bigint, open, high, low, close FROM ohlc
-			 WHERE instrument=$1 AND time >= $2 AND time <= $3
-			 ORDER BY time ASC`
+			 WHERE instrument=$1 AND time >= $2 AND time <= $3 ORDER BY time ASC`
 	default:
 		return nil, fmt.Errorf("unknown indicator: %s", indicator)
 	}
@@ -199,8 +180,7 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 	return points, nil
 }
 
-// BackfillRedis writes Postgres points back into Redis async so the next
-// request is served from cache. Runs in a goroutine — errors are logged only.
+// BackfillRedis writes Postgres points back into Redis (primary) async.
 func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution string, points []Point) {
 	ctx := context.Background()
 	var key string
@@ -219,17 +199,14 @@ func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution str
 
 	members := make([]redis.Z, 0, len(points))
 	for _, p := range points {
-		members = append(members, redis.Z{
-			Score:  float64(p.Ts),
-			Member: p.Value,
-		})
+		members = append(members, redis.Z{Score: float64(p.Ts), Member: p.Value})
 	}
 
+	// backfill always goes to primary (write path)
 	if err := s.rdb.ZAdd(ctx, key, members...).Err(); err != nil {
 		log.Printf("[BackfillRedis] %s:%d error: %v", indicator, instrumentID, err)
 		return
 	}
-
 	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxEntries-1)
 	s.rdb.Expire(ctx, key, ttl)
 	log.Printf("[BackfillRedis] %s:%d backfilled %d points into Redis", indicator, instrumentID, len(points))
