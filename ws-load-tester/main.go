@@ -25,10 +25,9 @@ var (
 	reconnects    atomic.Int64
 
 	latencyMu      sync.Mutex
-	latencySamples []int64 // microseconds, reset on each flush
+	latencySamples []int64
 )
 
-// ---- latency helpers ----
 func recordLatency(us int64) {
 	if us <= 0 || us > 30_000_000 {
 		return
@@ -62,10 +61,8 @@ func flushLatency() (min, avg, max, p95 float64, count int) {
 		}
 	}
 
-	// p95 — sort-free approximation using reservoir
 	sorted := make([]int64, count)
 	copy(sorted, samples)
-	// partial insertion sort for p95 index only
 	p95idx := int(float64(count) * 0.95)
 	for i := 1; i <= p95idx && i < count; i++ {
 		key := sorted[i]
@@ -85,7 +82,6 @@ func flushLatency() (min, avg, max, p95 float64, count int) {
 		count
 }
 
-// ---- snapshot table ----
 type Snapshot struct {
 	ElapsedS   float64
 	Clients    int
@@ -97,7 +93,6 @@ type Snapshot struct {
 	AvgLatMs   float64
 	P95LatMs   float64
 	MaxLatMs   float64
-	RedisMemMB float64
 	HeapMB     float64
 }
 
@@ -112,7 +107,6 @@ func addSnapshot(s Snapshot) {
 	snapshotMu.Unlock()
 }
 
-// ---- metrics poller ----
 type hubMetrics struct {
 	HeapMB float64 `json:"heap_mb"`
 }
@@ -131,12 +125,6 @@ func pollMetrics(metricsURL string) float64 {
 	return m.HeapMB
 }
 
-// ---- Redis memory poller via redis-cli ----
-// We poll the /metrics endpoint instead of redis-cli to avoid
-// spawning subprocesses (memory concern on Windows).
-// Redis memory is approximated from heap_mb on the dataserver.
-
-// ---- consumer goroutine ----
 func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -144,8 +132,6 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 
 	var conn *websocket.Conn
 	var err error
-
-	// retry connect up to 3 times
 	for attempt := 0; attempt < 3; attempt++ {
 		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
 		if err == nil {
@@ -164,7 +150,7 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 		conn.WriteJSON(map[string]string{"type": "join", "room": room})
 	}
 
-	msgCh := make(chan map[string]interface{}, 256)
+	msgCh := make(chan map[string]interface{}, 512)
 
 	go func() {
 		for {
@@ -186,13 +172,11 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 			return
 		case msg := <-msgCh:
 			totalReceived.Add(1)
-			// latency from timestamp field (analytics events carry nanosecond ts)
 			if data, ok := msg["data"].(map[string]interface{}); ok {
 				if ts, ok := data["timestamp"].(float64); ok && ts > 0 {
 					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
 					recordLatency(latencyUs)
 				}
-				// fallback: ingested_at for price_update events
 				if ts, ok := data["ingested_at"].(float64); ok && ts > 0 {
 					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
 					recordLatency(latencyUs)
@@ -202,50 +186,63 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 	}
 }
 
+// allRooms builds a comma-separated string of all 300 instrument IDs.
+func allRooms() string {
+	ids := make([]string, 200)
+	for i := 0; i < 200; i++ {
+		ids[i] = fmt.Sprintf("%d", 101+i)
+	}
+	return strings.Join(ids, ",")
+}
+
 func main() {
-	clients := flag.Int("clients", 20, "concurrent consumers")
-	rooms := flag.String("rooms", "101,102,103,104,105", "comma-separated instrument IDs")
+	clients := flag.Int("clients", 200, "concurrent consumers (phase1=200, phase2=500, phase3=1000)")
+	rooms := flag.String("rooms", allRooms(), "comma-separated instrument IDs (default: all 300)")
 	duration := flag.Int("duration", 120, "test duration in seconds")
 	host := flag.String("host", "localhost:80", "nginx address")
 	metrics := flag.String("metrics", "http://localhost:8081/metrics", "dataserver metrics URL")
-	phase := flag.String("phase", "1", "phase label (1=baseline, 2=load, 3=failover)")
+	phase := flag.String("phase", "1", "phase label for output (1/2/3)")
+	rampMs := flag.Int("ramp-ms", 10, "ms delay between each client connect (reduce for faster ramp)")
 	flag.Parse()
 
 	roomList := strings.Split(*rooms, ",")
 
 	fmt.Printf("\n========================================\n")
 	fmt.Printf("  LOAD TEST  phase=%s  clients=%d\n", *phase, *clients)
-	fmt.Printf("  rooms=%s  duration=%ds\n", *rooms, *duration)
-	fmt.Printf("  target=%s\n", *host)
-	fmt.Printf("========================================\n\n")
+	fmt.Printf("  instruments=%d  duration=%ds\n", len(roomList), *duration)
+	fmt.Printf("  target=%s  ramp=%dms/client\n", *host, *rampMs)
+	fmt.Printf("========================================\n")
 
-	if *phase == "3" {
-		fmt.Println("PHASE 3 — FAILOVER UNDER LOAD")
-		fmt.Println("  at t=30s : kill leader dataserver")
-		fmt.Println("  at t=60s : kill Redis primary")
-		fmt.Println("  watch for reconnects + latency spikes\n")
+	// phase hints
+	switch *phase {
+	case "1":
+		fmt.Println("  PHASE 1 — baseline (200 clients, all 300 instruments)")
+	case "2":
+		fmt.Println("  PHASE 2 — load (500 clients, all 300 instruments)")
+	case "3":
+		fmt.Println("  PHASE 3 — stress (1000 clients, all 300 instruments)")
+		fmt.Println("  TIP: kill leader at t=30s, kill Redis primary at t=60s")
 	}
+	fmt.Println()
 
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 	start := time.Now()
 
-	// ramp up clients with small delay to avoid thundering herd
 	for i := 0; i < *clients; i++ {
 		wg.Add(1)
 		go runConsumer(i, *host, roomList, stop, &wg)
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(time.Duration(*rampMs) * time.Millisecond)
 	}
 
-	// ---- reporter: every 10s ----
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		var lastTotal int64
 
-		fmt.Printf("%-8s %-8s %-10s %-10s %-10s %-10s %-10s %-10s\n",
+		fmt.Printf("%-8s %-8s %-12s %-10s %-10s %-10s %-10s %-10s\n",
 			"time(s)", "rate/s", "total", "dropped", "avg_ms", "p95_ms", "max_ms", "heap_mb")
-		fmt.Println(strings.Repeat("-", 80))
+		fmt.Println(strings.Repeat("-", 82))
 
 		for {
 			select {
@@ -258,8 +255,7 @@ func main() {
 				lastTotal = current
 				rate := float64(delta) / 10.0
 
-				minL, avgL, maxL, p95L, lcount := flushLatency()
-				_ = minL
+				_, avgL, maxL, p95L, lcount := flushLatency()
 				heapMB := pollMetrics(*metrics)
 
 				snap := Snapshot{
@@ -280,11 +276,11 @@ func main() {
 				addSnapshot(snap)
 
 				if lcount > 0 {
-					fmt.Printf("%-8.0f %-8.1f %-10d %-10d %-10.2f %-10.2f %-10.2f %-10.2f\n",
+					fmt.Printf("%-8.0f %-8.1f %-12d %-10d %-10.2f %-10.2f %-10.2f %-10.2f\n",
 						elapsed, rate, current, totalDropped.Load(),
 						avgL, p95L, maxL, heapMB)
 				} else {
-					fmt.Printf("%-8.0f %-8.1f %-10d %-10d %-10s %-10s %-10s %-10.2f\n",
+					fmt.Printf("%-8.0f %-8.1f %-12d %-10d %-10s %-10s %-10s %-10.2f\n",
 						elapsed, rate, current, totalDropped.Load(),
 						"n/a", "n/a", "n/a", heapMB)
 				}
@@ -296,13 +292,13 @@ func main() {
 	close(stop)
 	wg.Wait()
 
-	// ---- final summary ----
 	_, avgL, maxL, p95L, lcount := flushLatency()
 
 	fmt.Printf("\n========================================\n")
 	fmt.Printf("  FINAL SUMMARY  phase=%s\n", *phase)
 	fmt.Printf("========================================\n")
 	fmt.Printf("  Clients           : %d\n", *clients)
+	fmt.Printf("  Instruments       : %d\n", len(roomList))
 	fmt.Printf("  Duration          : %ds\n", *duration)
 	fmt.Printf("  Total received    : %d\n", totalReceived.Load())
 	fmt.Printf("  Total dropped     : %d\n", totalDropped.Load())
@@ -318,7 +314,6 @@ func main() {
 		100.0*float64(totalDropped.Load())/
 			math.Max(1, float64(totalReceived.Load()+totalDropped.Load())))
 
-	// ---- snapshot table ----
 	snapshotMu.Lock()
 	defer snapshotMu.Unlock()
 	if len(snapshots) > 0 {
