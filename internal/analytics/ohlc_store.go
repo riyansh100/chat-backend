@@ -1,3 +1,4 @@
+// internal/analytics/ohlc_store.go
 package analytics
 
 import (
@@ -15,13 +16,12 @@ import (
 const maxOHLCEntries = 1440
 
 type OHLCStore struct {
-	rdb     *redis.Client
-	readRDB *chatredis.SafeReadClient
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewOHLCStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *OHLCStore {
-	return &OHLCStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewOHLCStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *OHLCStore {
+	return &OHLCStore{lb: lb, pool: pool}
 }
 
 func ohlcKey(instrumentID int) string { return fmt.Sprintf("ohlc:1m:%d", instrumentID) }
@@ -44,15 +44,15 @@ func (s *OHLCStore) writeRedis(ctx context.Context, event OHLCEvent) error {
 	if err != nil {
 		return err
 	}
+	rdb := s.lb.WriteClient()
 	key := ohlcKey(event.InstrumentID)
-	err = s.rdb.ZAdd(ctx, key, redis.Z{
+	if err := rdb.ZAdd(ctx, key, redis.Z{
 		Score:  float64(event.Timestamp),
 		Member: string(payload),
-	}).Err()
-	if err != nil {
+	}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxOHLCEntries-1)
+	rdb.ZRemRangeByRank(ctx, key, 0, -maxOHLCEntries-1)
 	return nil
 }
 
@@ -66,11 +66,11 @@ func (s *OHLCStore) writePostgres(ctx context.Context, event OHLCEvent) error {
 }
 
 func (s *OHLCStore) GetLast(ctx context.Context, instrumentID int, n int) ([]redis.Z, error) {
-	return s.readRDB.ZRangeWithScores(ctx, ohlcKey(instrumentID), int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, ohlcKey(instrumentID), int64(-n), -1).Result()
 }
 
 func (s *OHLCStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64) ([]redis.Z, error) {
-	return s.readRDB.ZRangeByScoreWithScores(ctx, ohlcKey(instrumentID), &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, ohlcKey(instrumentID), &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()

@@ -1,3 +1,4 @@
+// internal/analytics/bb_store.go
 package analytics
 
 import (
@@ -15,13 +16,12 @@ import (
 const maxBBEntries = 1440
 
 type BBStore struct {
-	rdb     *redis.Client
-	readRDB *chatredis.SafeReadClient
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewBBStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *BBStore {
-	return &BBStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewBBStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *BBStore {
+	return &BBStore{lb: lb, pool: pool}
 }
 
 func bbKey(instrumentID int) string { return fmt.Sprintf("bb:1m:%d", instrumentID) }
@@ -40,18 +40,19 @@ func (s *BBStore) Write(ctx context.Context, event BBUpdateEvent) error {
 
 func (s *BBStore) writeRedis(ctx context.Context, event BBUpdateEvent) error {
 	payload, err := json.Marshal(map[string]interface{}{
-		"upper": event.Upper, "middle": event.Middle, "lower": event.Lower, "ts": event.Timestamp,
+		"upper": event.Upper, "middle": event.Middle,
+		"lower": event.Lower, "ts": event.Timestamp,
 	})
 	if err != nil {
 		return err
 	}
+	rdb := s.lb.WriteClient()
 	key := bbKey(event.InstrumentID)
 	ts := float64(time.Now().Unix())
-	err = s.rdb.ZAdd(ctx, key, redis.Z{Score: ts, Member: string(payload)}).Err()
-	if err != nil {
+	if err := rdb.ZAdd(ctx, key, redis.Z{Score: ts, Member: string(payload)}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxBBEntries-1)
+	rdb.ZRemRangeByRank(ctx, key, 0, -maxBBEntries-1)
 	return nil
 }
 
@@ -65,11 +66,11 @@ func (s *BBStore) writePostgres(ctx context.Context, event BBUpdateEvent) error 
 }
 
 func (s *BBStore) GetLast(ctx context.Context, instrumentID int, n int) ([]redis.Z, error) {
-	return s.readRDB.ZRangeWithScores(ctx, bbKey(instrumentID), int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, bbKey(instrumentID), int64(-n), -1).Result()
 }
 
 func (s *BBStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64) ([]redis.Z, error) {
-	return s.readRDB.ZRangeByScoreWithScores(ctx, bbKey(instrumentID), &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, bbKey(instrumentID), &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()

@@ -1,3 +1,4 @@
+// internal/analytics/store.go
 package analytics
 
 import (
@@ -17,13 +18,12 @@ const (
 )
 
 type SMAStore struct {
-	rdb     *redis.Client             // write client (primary via sentinel)
-	readRDB *chatredis.SafeReadClient // read client (replica w/ fallback)
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewSMAStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *SMAStore {
-	return &SMAStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewSMAStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *SMAStore {
+	return &SMAStore{lb: lb, pool: pool}
 }
 
 func key1s(instrumentID int) string { return fmt.Sprintf("sma:1s:%d", instrumentID) }
@@ -52,15 +52,15 @@ func (s *SMAStore) writeRedis(ctx context.Context, event SMAUpdateEvent) error {
 		k = key1s(event.InstrumentID)
 		maxEntries = maxEntries1s
 	}
+	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
-	err := s.rdb.ZAdd(ctx, k, redis.Z{
+	if err := rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
 		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
-	}).Err()
-	if err != nil {
+	}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
+	rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
 
@@ -73,7 +73,7 @@ func (s *SMAStore) writePostgres(ctx context.Context, event SMAUpdateEvent) erro
 	return err
 }
 
-// GetLast reads from replica (with primary fallback).
+// GetLast — concurrent scatter-gather read across all healthy replicas.
 func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolution string) ([]redis.Z, error) {
 	var k string
 	if resolution == "1m" {
@@ -81,10 +81,10 @@ func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	} else {
 		k = key1s(instrumentID)
 	}
-	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
-// GetRange reads from replica (with primary fallback).
+// GetRange — concurrent scatter-gather read across all healthy replicas.
 func (s *SMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
 	var k string
 	if resolution == "1m" {
@@ -92,7 +92,7 @@ func (s *SMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toU
 	} else {
 		k = key1s(instrumentID)
 	}
-	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()

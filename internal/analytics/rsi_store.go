@@ -1,3 +1,4 @@
+// internal/analytics/rsi_store.go
 package analytics
 
 import (
@@ -17,13 +18,12 @@ const (
 )
 
 type RSIStore struct {
-	rdb     *redis.Client
-	readRDB *chatredis.SafeReadClient
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewRSIStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *RSIStore {
-	return &RSIStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewRSIStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *RSIStore {
+	return &RSIStore{lb: lb, pool: pool}
 }
 
 func rsiKey1s(instrumentID int) string { return fmt.Sprintf("rsi:1s:%d", instrumentID) }
@@ -52,15 +52,15 @@ func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 		k = rsiKey1s(event.InstrumentID)
 		maxEntries = maxRSIEntries1s
 	}
+	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
-	err := s.rdb.ZAdd(ctx, k, redis.Z{
+	if err := rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
 		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
-	}).Err()
-	if err != nil {
+	}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
+	rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
 
@@ -80,7 +80,7 @@ func (s *RSIStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	} else {
 		k = rsiKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
 func (s *RSIStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
@@ -90,7 +90,7 @@ func (s *RSIStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toU
 	} else {
 		k = rsiKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()

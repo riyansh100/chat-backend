@@ -1,3 +1,4 @@
+// internal/analytics/ema_store.go
 package analytics
 
 import (
@@ -17,13 +18,12 @@ const (
 )
 
 type EMAStore struct {
-	rdb     *redis.Client
-	readRDB *chatredis.SafeReadClient
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewEMAStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *EMAStore {
-	return &EMAStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewEMAStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *EMAStore {
+	return &EMAStore{lb: lb, pool: pool}
 }
 
 func emaKey1s(instrumentID int) string { return fmt.Sprintf("ema:1s:%d", instrumentID) }
@@ -52,15 +52,15 @@ func (s *EMAStore) writeRedis(ctx context.Context, event EMAUpdateEvent) error {
 		k = emaKey1s(event.InstrumentID)
 		maxEntries = maxEMAEntries1s
 	}
+	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
-	err := s.rdb.ZAdd(ctx, k, redis.Z{
+	if err := rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
 		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
-	}).Err()
-	if err != nil {
+	}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
+	rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
 
@@ -80,7 +80,7 @@ func (s *EMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	} else {
 		k = emaKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
 func (s *EMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
@@ -90,7 +90,7 @@ func (s *EMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toU
 	} else {
 		k = emaKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
