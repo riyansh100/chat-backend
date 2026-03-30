@@ -1,3 +1,4 @@
+// internal/analytics/macd_Store.go
 package analytics
 
 import (
@@ -18,13 +19,12 @@ const (
 )
 
 type MACDStore struct {
-	rdb     *redis.Client
-	readRDB *chatredis.SafeReadClient
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewMACDStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *MACDStore {
-	return &MACDStore{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewMACDStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *MACDStore {
+	return &MACDStore{lb: lb, pool: pool}
 }
 
 func macdKey1s(instrumentID int) string { return fmt.Sprintf("macd:1s:%d", instrumentID) }
@@ -60,12 +60,12 @@ func (s *MACDStore) writeRedis(ctx context.Context, event MACDUpdateEvent) error
 	if err != nil {
 		return err
 	}
+	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
-	err = s.rdb.ZAdd(ctx, k, redis.Z{Score: float64(ts), Member: string(payload)}).Err()
-	if err != nil {
+	if err := rdb.ZAdd(ctx, k, redis.Z{Score: float64(ts), Member: string(payload)}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
+	rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
 	return nil
 }
 
@@ -85,7 +85,7 @@ func (s *MACDStore) GetLast(ctx context.Context, instrumentID int, n int, resolu
 	} else {
 		k = macdKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
+	return s.lb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
 func (s *MACDStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
@@ -95,7 +95,7 @@ func (s *MACDStore) GetRange(ctx context.Context, instrumentID int, fromUnix, to
 	} else {
 		k = macdKey1s(instrumentID)
 	}
-	return s.readRDB.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
+	return s.lb.ZRangeByScoreWithScores(ctx, k, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()

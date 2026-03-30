@@ -1,3 +1,4 @@
+// internal/history/store.go
 package history
 
 import (
@@ -18,24 +19,19 @@ const (
 	TTL1h = 7 * 24 * time.Hour
 )
 
-// Point is a generic time-value entry stored in Redis sorted sets.
-// For multi-field indicators (MACD, BB, OHLC), Value is a JSON string.
 type Point struct {
-	Ts    int64  // unix seconds — used as score
-	Value string // float string for scalar, JSON for multi-field
+	Ts    int64
+	Value string
 }
 
 type Store struct {
-	rdb     *redis.Client             // write client — primary via sentinel
-	readRDB *chatredis.SafeReadClient // read client — replica w/ fallback
-	pool    *pgxpool.Pool
+	lb   *chatredis.RedisLoadBalancer
+	pool *pgxpool.Pool
 }
 
-func NewStore(rdb *redis.Client, readRDB *chatredis.SafeReadClient, pool *pgxpool.Pool) *Store {
-	return &Store{rdb: rdb, readRDB: readRDB, pool: pool}
+func NewStore(lb *chatredis.RedisLoadBalancer, pool *pgxpool.Pool) *Store {
+	return &Store{lb: lb, pool: pool}
 }
-
-// ---- key helpers ----
 
 func Key1m(indicator string, instrumentID int) string {
 	return fmt.Sprintf("hist:1m:%s:%d", indicator, instrumentID)
@@ -45,31 +41,31 @@ func Key1h(indicator string, instrumentID int) string {
 	return fmt.Sprintf("hist:1h:%s:%d", indicator, instrumentID)
 }
 
-// ---- write (primary) ----
+// ---- write (least-loaded primary) ----
 
 func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1m(indicator, instrumentID)
-	err := s.rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err()
-	if err != nil {
+	rdb := s.lb.WriteClient()
+	if err := rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -2881)
-	s.rdb.Expire(ctx, key, TTL1m)
+	rdb.ZRemRangeByRank(ctx, key, 0, -2881)
+	rdb.Expire(ctx, key, TTL1m)
 	return nil
 }
 
 func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
 	key := Key1h(indicator, instrumentID)
-	err := s.rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err()
-	if err != nil {
+	rdb := s.lb.WriteClient()
+	if err := rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err(); err != nil {
 		return err
 	}
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -169)
-	s.rdb.Expire(ctx, key, TTL1h)
+	rdb.ZRemRangeByRank(ctx, key, 0, -169)
+	rdb.Expire(ctx, key, TTL1h)
 	return nil
 }
 
-// ---- read (replica w/ fallback) ----
+// ---- read (scatter-gather across replicas) ----
 
 func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int, resolution string, n int) ([]Point, error) {
 	var key string
@@ -78,7 +74,7 @@ func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int
 	} else {
 		key = Key1m(indicator, instrumentID)
 	}
-	zs, err := s.readRDB.ZRangeWithScores(ctx, key, int64(-n), -1).Result()
+	zs, err := s.lb.ZRangeWithScores(ctx, key, int64(-n), -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +92,7 @@ func (s *Store) GetRange(ctx context.Context, indicator string, instrumentID int
 	} else {
 		key = Key1m(indicator, instrumentID)
 	}
-	zs, err := s.readRDB.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
+	zs, err := s.lb.ZRangeByScoreWithScores(ctx, key, &redis.ZRangeBy{
 		Min: strconv.FormatInt(fromUnix, 10),
 		Max: strconv.FormatInt(toUnix, 10),
 	}).Result()
@@ -180,7 +176,7 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 	return points, nil
 }
 
-// BackfillRedis writes Postgres points back into Redis (primary) async.
+// BackfillRedis writes Postgres points back to least-loaded primary.
 func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution string, points []Point) {
 	ctx := context.Background()
 	var key string
@@ -202,12 +198,12 @@ func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution str
 		members = append(members, redis.Z{Score: float64(p.Ts), Member: p.Value})
 	}
 
-	// backfill always goes to primary (write path)
-	if err := s.rdb.ZAdd(ctx, key, members...).Err(); err != nil {
+	rdb := s.lb.WriteClient()
+	if err := rdb.ZAdd(ctx, key, members...).Err(); err != nil {
 		log.Printf("[BackfillRedis] %s:%d error: %v", indicator, instrumentID, err)
 		return
 	}
-	s.rdb.ZRemRangeByRank(ctx, key, 0, -maxEntries-1)
-	s.rdb.Expire(ctx, key, ttl)
-	log.Printf("[BackfillRedis] %s:%d backfilled %d points into Redis", indicator, instrumentID, len(points))
+	rdb.ZRemRangeByRank(ctx, key, 0, -maxEntries-1)
+	rdb.Expire(ctx, key, ttl)
+	log.Printf("[BackfillRedis] %s:%d backfilled %d points", indicator, instrumentID, len(points))
 }
