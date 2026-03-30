@@ -1,3 +1,4 @@
+// internal/redis/cache.go
 package redis
 
 import (
@@ -39,9 +40,11 @@ func (r *RedisCache) GetLastPrice(ctx context.Context, instrument string) ([]byt
 	return r.client.Get(ctx, r.key(instrument)).Bytes()
 }
 
-// NewSentinelClient creates a Sentinel-aware Redis client that always points
-// to the current primary. Use this for all WRITES.
-func NewSentinelClient() *redis.Client {
+// ---- pair 1 clients (existing ports) ----
+
+// NewPair1PrimaryClient returns a sentinel-aware write client for pair1.
+// Sentinel :26380 monitors primary :6381, replica :6380.
+func NewPair1PrimaryClient() *redis.Client {
 	return redis.NewFailoverClient(&redis.FailoverOptions{
 		MasterName:    "mymaster",
 		SentinelAddrs: []string{"127.0.0.1:26380"},
@@ -51,9 +54,8 @@ func NewSentinelClient() *redis.Client {
 	})
 }
 
-// NewReplicaClient creates a direct client to the replica for READ operations.
-// Reads bypass the primary, reducing its load and giving ~1-3ms lower latency.
-func NewReplicaClient() *redis.Client {
+// NewPair1ReplicaClient returns a direct read client for pair1 replica.
+func NewPair1ReplicaClient() *redis.Client {
 	return redis.NewClient(&redis.Options{
 		Addr:        "127.0.0.1:6380",
 		PoolSize:    10,
@@ -62,9 +64,44 @@ func NewReplicaClient() *redis.Client {
 	})
 }
 
-// SafeReadClient wraps a replica client with automatic fallback to the primary
-// if the replica is unavailable (e.g. during sentinel failover promotion).
-// All reads go to replica first; on any error, the same read is retried on primary.
+// ---- pair 2 clients (new ports) ----
+
+// NewPair2PrimaryClient returns a sentinel-aware write client for pair2.
+// Sentinel :26381 monitors primary :6383, replica :6382.
+func NewPair2PrimaryClient() *redis.Client {
+	return redis.NewFailoverClient(&redis.FailoverOptions{
+		MasterName:    "mymaster2",
+		SentinelAddrs: []string{"127.0.0.1:26381"},
+		PoolSize:      10,
+		DialTimeout:   5 * time.Second,
+		ReadTimeout:   3 * time.Second,
+	})
+}
+
+// NewPair2ReplicaClient returns a direct read client for pair2 replica.
+func NewPair2ReplicaClient() *redis.Client {
+	return redis.NewClient(&redis.Options{
+		Addr:        "127.0.0.1:6382",
+		PoolSize:    10,
+		DialTimeout: 5 * time.Second,
+		ReadTimeout: 3 * time.Second,
+	})
+}
+
+// ---- legacy helpers (kept for compatibility) ----
+
+// NewSentinelClient kept for leader election in dataserver (always needs pair1 primary).
+func NewSentinelClient() *redis.Client {
+	return NewPair1PrimaryClient()
+}
+
+// NewReplicaClient kept for compatibility.
+func NewReplicaClient() *redis.Client {
+	return NewPair1ReplicaClient()
+}
+
+// NewSafeReadClient kept for compatibility — wraps single replica with primary fallback.
+// Prefer RedisLoadBalancer for new code.
 type SafeReadClient struct {
 	replica *redis.Client
 	primary *redis.Client
@@ -74,7 +111,6 @@ func NewSafeReadClient(replica, primary *redis.Client) *SafeReadClient {
 	return &SafeReadClient{replica: replica, primary: primary}
 }
 
-// ZRangeWithScores reads from replica, falls back to primary on error.
 func (s *SafeReadClient) ZRangeWithScores(ctx context.Context, key string, start, stop int64) *redis.ZSliceCmd {
 	cmd := s.replica.ZRangeWithScores(ctx, key, start, stop)
 	if cmd.Err() != nil && cmd.Err() != redis.Nil {
@@ -84,7 +120,6 @@ func (s *SafeReadClient) ZRangeWithScores(ctx context.Context, key string, start
 	return cmd
 }
 
-// ZRangeByScoreWithScores reads from replica, falls back to primary on error.
 func (s *SafeReadClient) ZRangeByScoreWithScores(ctx context.Context, key string, opt *redis.ZRangeBy) *redis.ZSliceCmd {
 	cmd := s.replica.ZRangeByScoreWithScores(ctx, key, opt)
 	if cmd.Err() != nil && cmd.Err() != redis.Nil {
@@ -94,7 +129,6 @@ func (s *SafeReadClient) ZRangeByScoreWithScores(ctx context.Context, key string
 	return cmd
 }
 
-// Get reads from replica, falls back to primary on error.
 func (s *SafeReadClient) Get(ctx context.Context, key string) *redis.StringCmd {
 	cmd := s.replica.Get(ctx, key)
 	if cmd.Err() != nil && cmd.Err() != redis.Nil {
