@@ -220,10 +220,8 @@ func (lb *RedisLoadBalancer) Get(ctx context.Context, key string) *redis.StringC
 	}
 
 	// collect results — return first non-error (or last result if all error)
-	var last *redis.StringCmd
 	for i := 0; i < healthy; i++ {
 		res := <-ch
-		last = res.cmd
 		if res.cmd.Err() == nil || res.cmd.Err() == redis.Nil {
 			return res.cmd
 		}
@@ -271,10 +269,8 @@ func (lb *RedisLoadBalancer) scatterGatherZRange(
 	}
 
 	// first successful response wins — drain remaining in background
-	var last *redis.ZSliceCmd
 	for i := 0; i < healthy; i++ {
 		res := <-ch
-		last = res.cmd
 		if res.cmd.Err() == nil || res.cmd.Err() == redis.Nil {
 			return res.cmd
 		}

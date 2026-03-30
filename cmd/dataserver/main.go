@@ -1,3 +1,4 @@
+// cmd/dataserver/main.go
 package main
 
 import (
@@ -9,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/riyansh/chat-backend/internal/background"
 	"github.com/riyansh/chat-backend/internal/history"
@@ -18,31 +20,39 @@ import (
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
+func pingNode(ctx context.Context, c *redis.Client, name string) {
+	if err := c.Ping(ctx).Err(); err != nil {
+		log.Printf("[DataServer] %s ping FAILED (%v) — lb will route around it", name, err)
+	} else {
+		log.Printf("[DataServer] %s connected", name)
+	}
+}
+
 func main() {
 	instanceID := uuid.NewString()
 	log.Println("[DataServer] instanceID:", instanceID)
 
-	// write client — primary via sentinel, auto-follows on failover
-	rdb := chatredis.NewSentinelClient()
-	defer rdb.Close()
-
-	// read client — replica direct, falls back to primary on error
-	replicaRDB := chatredis.NewReplicaClient()
-	defer replicaRDB.Close()
-
-	readRDB := chatredis.NewSafeReadClient(replicaRDB, rdb)
-
 	ctx := context.Background()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("[DataServer] Redis primary ping failed:", err)
-	}
-	log.Println("[DataServer] Redis primary (write) connected")
 
-	if err := replicaRDB.Ping(ctx).Err(); err != nil {
-		log.Printf("[DataServer] Redis replica ping failed (%v) — reads will fall back to primary", err)
-	} else {
-		log.Println("[DataServer] Redis replica (read) connected")
-	}
+	// ---- pair 1: primary :6381 (sentinel :26380), replica :6380 ----
+	pair1Primary := chatredis.NewPair1PrimaryClient()
+	pair1Replica := chatredis.NewPair1ReplicaClient()
+	defer pair1Primary.Close()
+	defer pair1Replica.Close()
+
+	// ---- pair 2: primary :6383 (sentinel :26381), replica :6382 ----
+	pair2Primary := chatredis.NewPair2PrimaryClient()
+	pair2Replica := chatredis.NewPair2ReplicaClient()
+	defer pair2Primary.Close()
+	defer pair2Replica.Close()
+
+	pingNode(ctx, pair1Primary, "pair1-primary(:6381)")
+	pingNode(ctx, pair1Replica, "pair1-replica(:6380)")
+	pingNode(ctx, pair2Primary, "pair2-primary(:6383)")
+	pingNode(ctx, pair2Replica, "pair2-replica(:6382)")
+
+	// load balancer: writes->least-loaded primary, reads->scatter-gather replicas
+	lb := chatredis.NewRedisLoadBalancer(pair1Primary, pair1Replica, pair2Primary, pair2Replica)
 
 	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
@@ -78,6 +88,12 @@ func main() {
 		)(w, r)
 	})
 
+	http.HandleFunc("/redis-status", func(w http.ResponseWriter, r *http.Request) {
+		lb.LogStatus()
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("redis lb status logged to stdout\n"))
+	})
+
 	go func() {
 		log.Println("[DataServer] HTTP listening on :" + port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
@@ -85,28 +101,25 @@ func main() {
 		}
 	}()
 
-	elect := leader.NewElection(rdb, instanceID)
+	elect := leader.NewElection(pair1Primary, instanceID)
 
 	elect.Run(ctx,
-
 		func(leaderCtx context.Context) {
 			log.Println("[DataServer] elected as leader — starting engines")
 
-			h := hub.NewHub(instanceID, redisCache, rdb, readRDB, pool)
+			h := hub.NewHub(instanceID, redisCache, pair1Primary, lb, pool)
 			hubRef = h
-
 			go h.Run()
 
 			feedSource := os.Getenv("FEED_SOURCE")
 			if feedSource == "" {
 				feedSource = "binance"
 			}
-
 			bgWorker := background.NewWorker(feedSource, h.Registry())
 			go bgWorker.Start(leaderCtx)
 			log.Printf("[DataServer] analytics worker started (source=%s)", feedSource)
 
-			histStore := history.NewStore(rdb, readRDB, pool)
+			histStore := history.NewStore(lb, pool)
 			go history.StartRollupJob(leaderCtx, histStore)
 			log.Println("[DataServer] hourly rollup job started")
 
@@ -114,7 +127,6 @@ func main() {
 			log.Println("[DataServer] leader context cancelled — engines stopping")
 			hubRef = nil
 		},
-
 		func() {
 			log.Println("[DataServer] leadership revoked — entering standby mode")
 			hubRef = nil
