@@ -18,31 +18,39 @@ import (
 	"github.com/riyansh/chat-backend/internal/ws"
 )
 
+func pingNode(ctx context.Context, c *redis.Client, name string) {
+	if err := c.Ping(ctx).Err(); err != nil {
+		log.Printf("[ClientServer] %s ping FAILED (%v) — lb will route around it", name, err)
+	} else {
+		log.Printf("[ClientServer] %s connected", name)
+	}
+}
+
 func main() {
 	instanceID := uuid.NewString()
 	log.Println("[ClientServer] instanceID:", instanceID)
 
-	// write client — primary via sentinel
-	rdb := chatredis.NewSentinelClient()
-	defer rdb.Close()
-
-	// read client — replica direct, falls back to primary on error
-	replicaRDB := chatredis.NewReplicaClient()
-	defer replicaRDB.Close()
-
-	readRDB := chatredis.NewSafeReadClient(replicaRDB, rdb)
-
 	ctx := context.Background()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatal("[ClientServer] Redis primary ping failed:", err)
-	}
-	log.Println("[ClientServer] Redis primary (write) connected")
 
-	if err := replicaRDB.Ping(ctx).Err(); err != nil {
-		log.Printf("[ClientServer] Redis replica ping failed (%v) — reads will fall back to primary", err)
-	} else {
-		log.Println("[ClientServer] Redis replica (read) connected")
-	}
+	// ---- pair 1: primary :6381 (sentinel :26380), replica :6380 ----
+	pair1Primary := chatredis.NewPair1PrimaryClient()
+	pair1Replica := chatredis.NewPair1ReplicaClient()
+	defer pair1Primary.Close()
+	defer pair1Replica.Close()
+
+	// ---- pair 2: primary :6383 (sentinel :26381), replica :6382 ----
+	pair2Primary := chatredis.NewPair2PrimaryClient()
+	pair2Replica := chatredis.NewPair2ReplicaClient()
+	defer pair2Primary.Close()
+	defer pair2Replica.Close()
+
+	pingNode(ctx, pair1Primary, "pair1-primary(:6381)")
+	pingNode(ctx, pair1Replica, "pair1-replica(:6380)")
+	pingNode(ctx, pair2Primary, "pair2-primary(:6383)")
+	pingNode(ctx, pair2Replica, "pair2-replica(:6382)")
+
+	// load balancer — writes to least-loaded primary, reads scatter-gather across replicas
+	lb := chatredis.NewRedisLoadBalancer(pair1Primary, pair1Replica, pair2Primary, pair2Replica)
 
 	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
@@ -54,15 +62,15 @@ func main() {
 	defer pool.Close()
 	log.Println("[ClientServer] Postgres connected")
 
-	h := hub.NewClientHub(instanceID, redisCache, rdb, readRDB, pool)
+	h := hub.NewClientHub(instanceID, redisCache, pair1Primary, lb, pool)
 
-	go subscribeAnalyticsEvents(ctx, rdb, h)
-	hub.StartRedisSubscriber(ctx, rdb, h)
+	go subscribeAnalyticsEvents(ctx, pair1Primary, h)
+	hub.StartRedisSubscriber(ctx, pair1Primary, h)
 
 	go h.Run()
 	log.Println("[ClientServer] hub running (no engines)")
 
-	histStore := history.NewStore(rdb, readRDB, pool)
+	histStore := history.NewStore(lb, pool)
 	http.HandleFunc("/history", history.Handler(histStore))
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
