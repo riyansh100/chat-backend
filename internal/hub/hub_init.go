@@ -1,3 +1,4 @@
+// internal/hub/hub_init.go
 package hub
 
 import (
@@ -28,9 +29,10 @@ func publish(ctx context.Context, rdb *goredis.Client, ev analyticsEvent) {
 	rdb.Publish(ctx, "analytics:events", payload)
 }
 
-// NewHub creates a full hub with all engines running (data server mode).
-// rdb = write client (primary via sentinel), readRDB = read client (replica w/ fallback).
-func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, readRDB *redis.SafeReadClient, pool *pgxpool.Pool) *Hub {
+// NewHub creates a full hub with all 6 engines (data server mode).
+// lb = RedisLoadBalancer managing both pairs.
+// rdb = write client (used for pub/sub — must be a concrete *redis.Client).
+func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -45,7 +47,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
-		readRDB:     readRDB,
+		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
 		Register:    make(chan *Client),
@@ -60,15 +62,14 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	hub.subManager = NewSubscriptionManager()
 	hub.registry = analytics.NewRegistry()
 
-	histStore := history.NewStore(rdb, readRDB, pool)
+	histStore := history.NewStore(lb, pool)
 
 	// ---- SMA ----
 	sma := analytics.NewEngine(20)
 	go sma.Run()
 	hub.smaEngine = sma
 	hub.registry.Register(sma)
-
-	smaStore := analytics.NewSMAStore(rdb, readRDB, pool)
+	smaStore := analytics.NewSMAStore(lb, pool)
 	hub.smaStore = smaStore
 
 	smaToHub := func(e analytics.SMAUpdateEvent) {
@@ -84,7 +85,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 		histStore.Write1m(context.Background(), "sma", e.InstrumentID,
 			e.Timestamp/1e9, strconv.FormatFloat(e.Value, 'f', 6, 64))
 	}
-
 	go func() {
 		for e := range hub.smaEngine.Output() {
 			smaToHub(e)
@@ -107,8 +107,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	go ohlc.Run()
 	hub.ohlcEngine = ohlc
 	hub.registry.Register(ohlc)
-
-	ohlcStore := analytics.NewOHLCStore(rdb, readRDB, pool)
+	ohlcStore := analytics.NewOHLCStore(lb, pool)
 	hub.ohlcStore = ohlcStore
 
 	go func() {
@@ -138,8 +137,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	go ema.Run()
 	hub.emaEngine = ema
 	hub.registry.Register(ema)
-
-	emaStore := analytics.NewEMAStore(rdb, readRDB, pool)
+	emaStore := analytics.NewEMAStore(lb, pool)
 	hub.emaStore = emaStore
 
 	emaToHub := func(e analytics.EMAUpdateEvent) {
@@ -155,7 +153,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 		histStore.Write1m(context.Background(), "ema", e.InstrumentID,
 			e.Timestamp/1e9, strconv.FormatFloat(e.Value, 'f', 6, 64))
 	}
-
 	go func() {
 		for e := range hub.emaEngine.Output() {
 			emaToHub(e)
@@ -178,8 +175,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	go bb.Run()
 	hub.bbEngine = bb
 	hub.registry.Register(bb)
-
-	bbStore := analytics.NewBBStore(rdb, readRDB, pool)
+	bbStore := analytics.NewBBStore(lb, pool)
 	hub.bbStore = bbStore
 
 	go func() {
@@ -209,8 +205,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	go rsi.Run()
 	hub.rsiEngine = rsi
 	hub.registry.Register(rsi)
-
-	rsiStore := analytics.NewRSIStore(rdb, readRDB, pool)
+	rsiStore := analytics.NewRSIStore(lb, pool)
 	hub.rsiStore = rsiStore
 
 	rsiToHub := func(e analytics.RSIUpdateEvent) {
@@ -226,7 +221,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 		histStore.Write1m(context.Background(), "rsi", e.InstrumentID,
 			e.Timestamp/1e9, strconv.FormatFloat(e.Value, 'f', 6, 64))
 	}
-
 	go func() {
 		for e := range hub.rsiEngine.Output() {
 			rsiToHub(e)
@@ -249,8 +243,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	go macd.Run()
 	hub.macdEngine = macd
 	hub.registry.Register(macd)
-
-	macdStore := analytics.NewMACDStore(rdb, readRDB, pool)
+	macdStore := analytics.NewMACDStore(lb, pool)
 	hub.macdStore = macdStore
 
 	macdToHub := func(e analytics.MACDUpdateEvent) {
@@ -269,7 +262,6 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 		})
 		histStore.Write1m(context.Background(), "macd", e.InstrumentID, e.Timestamp/1e9, string(m))
 	}
-
 	go func() {
 		for e := range hub.macdEngine.Output() {
 			macdToHub(e)
@@ -290,8 +282,8 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, read
 	return hub
 }
 
-// NewClientHub creates a hub with NO engines — client server mode.
-func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, readRDB *redis.SafeReadClient, pool *pgxpool.Pool) *Hub {
+// NewClientHub creates a hub with NO engines (client server mode).
+func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -306,7 +298,7 @@ func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
-		readRDB:     readRDB,
+		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
 		Register:    make(chan *Client),

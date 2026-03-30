@@ -1,3 +1,4 @@
+// internal/hub/hub.go
 package hub
 
 import (
@@ -11,8 +12,8 @@ import (
 
 type Hub struct {
 	Rooms       map[string]*Room
-	RedisClient *goredis.Client           // write client (primary via sentinel)
-	readRDB     *chatredis.SafeReadClient // read client (replica w/ fallback)
+	RedisClient *goredis.Client              // write client — least-loaded primary (from lb)
+	lb          *chatredis.RedisLoadBalancer // load balancer — owns all 4 Redis clients
 	pgPool      *pgxpool.Pool
 
 	Register   chan *Client
