@@ -178,10 +178,10 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 	}
 }
 
-// allRooms builds a comma-separated string of all 300 instrument IDs.
+// allRooms builds a comma-separated string of instrument IDs 101-300.
 func allRooms() string {
-	ids := make([]string, 300)
-	for i := 0; i < 300; i++ {
+	ids := make([]string, 200)
+	for i := 0; i < 200; i++ {
 		ids[i] = fmt.Sprintf("%d", 101+i)
 	}
 	return strings.Join(ids, ",")
