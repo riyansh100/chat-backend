@@ -150,37 +150,29 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 		conn.WriteJSON(map[string]string{"type": "join", "room": room})
 	}
 
-	msgCh := make(chan map[string]interface{}, 512)
-
+	// Read and process inline — no intermediate channel, no tester-side drops.
+	// When stop closes we set a short deadline so ReadJSON unblocks promptly.
 	go func() {
-		for {
-			var msg map[string]interface{}
-			if err := conn.ReadJSON(&msg); err != nil {
-				return
-			}
-			select {
-			case msgCh <- msg:
-			default:
-				totalDropped.Add(1)
-			}
-		}
+		<-stop
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 	}()
 
 	for {
-		select {
-		case <-stop:
+		var msg map[string]interface{}
+		if err := conn.ReadJSON(&msg); err != nil {
 			return
-		case msg := <-msgCh:
-			totalReceived.Add(1)
-			if data, ok := msg["data"].(map[string]interface{}); ok {
-				if ts, ok := data["timestamp"].(float64); ok && ts > 0 {
-					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
-					recordLatency(latencyUs)
-				}
-				if ts, ok := data["ingested_at"].(float64); ok && ts > 0 {
-					latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
-					recordLatency(latencyUs)
-				}
+		}
+
+		totalReceived.Add(1)
+
+		if data, ok := msg["data"].(map[string]interface{}); ok {
+			if ts, ok := data["timestamp"].(float64); ok && ts > 0 {
+				latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
+				recordLatency(latencyUs)
+			}
+			if ts, ok := data["ingested_at"].(float64); ok && ts > 0 {
+				latencyUs := (time.Now().UnixNano() - int64(ts)) / 1000
+				recordLatency(latencyUs)
 			}
 		}
 	}
@@ -188,8 +180,8 @@ func runConsumer(id int, host string, rooms []string, stop chan struct{}, wg *sy
 
 // allRooms builds a comma-separated string of all 300 instrument IDs.
 func allRooms() string {
-	ids := make([]string, 200)
-	for i := 0; i < 200; i++ {
+	ids := make([]string, 300)
+	for i := 0; i < 300; i++ {
 		ids[i] = fmt.Sprintf("%d", 101+i)
 	}
 	return strings.Join(ids, ",")
