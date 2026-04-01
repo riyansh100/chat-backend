@@ -1,4 +1,4 @@
-module ws-consumer 
+module ws-consumer
 
 go 1.22
 
