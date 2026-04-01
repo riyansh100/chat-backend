@@ -1,0 +1,218 @@
+11-03
+
+Binance/Mock Feed → BG Worker → Hub's smaEngine.Input() + ohlcEngine.Input()
+                                        ↓
+                              Redis/Postgres (already wired)
+                                        ↓
+                              Consumer joins → gets history instantly
+
+_________
+12-03
+
+Based on the actual codebase, here's what makes sense to build next:
+
+---
+
+**Immediate / Easy Wins**
+- Clean up `trading/emitter.go` (unused `PriceUpdateChan`) and `trading/event_types.go` (empty file)
+- Remove `server.exe` and `dump.rdb` from git (add to `.gitignore`)
+- OHLC history on room join — same pattern as SMA history, `ohlcStore.GetLast()` already exists, just not wired into `hub_run.go`
+- `ws-consumer` doesn't handle `ohlc_update` messages — falls through silently to the price branch
+
+---
+
+**Phase 7 — More Resolutions**
+- 5m, 15m, 1h OHLC candles — OHLCEngine needs multiple tickers
+- 5m, 1h SMA bucketing — same pattern as 1m in engine.go
+
+---
+
+**Phase 8 — Durability / Replay**
+- Redis Streams as an append-only event log — every price tick written to a stream, replayable on reconnect
+- Or Kafka/NATS JetStream if mentor wants to go heavier
+
+---
+
+**Phase 9 — TimescaleDB Migration**
+- Already planned, literally just `CREATE EXTENSION timescaledb` + `select create_hypertable('ohlc', 'time')` — no Go code changes needed
+- Unlocks time-bucketed SQL queries, compression, retention policies
+
+---
+
+**Phase 10 — REST API Layer**
+- `GET /api/ohlc/{instrument}?resolution=1m&from=&to=` — query Postgres directly
+- `GET /api/sma/{instrument}?resolution=1s&n=100` — query Redis sorted sets
+- Right now there's zero way to query historical data except being a connected WS consumer
+
+---
+
+**Phase 11 — Auth**
+- `internal/auth/` directory already exists but is completely empty
+- API key validation on `/ws/ingest` (currently anyone can be an ingestor)
+- JWT or API key for consumers
+
+---
+
+**Phase 12 — Horizontal Scaling**
+- Hub sharding by instrument ID — right now one Hub owns all rooms
+- Instrument partitioning — 101-105 on instance A, 106-110 on instance B
+- Redis Pub/Sub already handles cross-instance fan-out, foundation is there
+
+---
+
+**Observability**
+- Expose metrics over HTTP (`/metrics`) in Prometheus format instead of just logging every 5s
+- Latency histogram per instrument (p50/p95/p99)
+- Alert if SMA/OHLC engine input channel fills up consistently
+
+---
+
+What does your mentor want to focus on next?
+
+
+____________
+13-03
+timeline
+
+Jan 16 — Initial commit, project scaffolded
+
+Feb 4 — Core architecture committed: WebSocket event backbone, Hub, Redis Pub/Sub, README
+
+Feb 19 — Binance feed integration, Redis KV warm-start, numeric instrument IDs (101-110)
+
+Feb 23 — Multi-stream Binance feed (all 10 instruments)
+
+Feb 26 — Ristretto L1 cache added, full two-level caching (L1 + Redis L2)
+
+Feb 27 — Hub metrics (atomic counters, throughput benchmarking)
+
+Mar 4-5 — Rolling SMA analytics engine, 1s/1m time bucketing, Redis sorted set storage, SMA history on room join
+
+Mar 9 — OHLC 1m candle engine, Redis + Postgres dual storage
+
+Mar 11 — Background analytics worker (server connects to Binance directly, analytics run independently of feed adapter), debug log cleanup
+
+Mar 12 — OHLC history on room join, ohlc_update/ohlc_history handling in consumer, dead code removed, binaries removed from git
+
+
+___________
+git log --oneline --date=short --format="%ad | %s"
+_______________________
+
+
+23mar
+
+NGINX SETUP INFO:
+
+sure, imagine a restaurant kitchen.
+right now your setup:
+one chef (dataserver) cooking all the food (price analytics), one waiter (clientserver) serving it to customers (WebSocket clients). works fine but if the chef gets sick, no food. if the waiter gets sick, no service.
+
+what we're building:
+two waiters (clientservers)
+both know the full menu, both can serve any customer. nginx is the host at the door — when a customer walks in, host sends them to whichever waiter is less busy. if waiter-1 gets sick, host sends everyone to waiter-2. customers don't even notice.
+two chefs (dataservers) — but only one cooks at a time
+here's the key part. if both chefs cook the same dish simultaneously, customers get double portions (duplicate analytics). so we use a golden spatula rule:
+
+only the chef holding the golden spatula is allowed to cook
+chef-1 grabs the spatula on startup and starts cooking
+chef-2 stands by watching, trying to grab the spatula every few seconds
+chef-1 must wave the spatula every 3 seconds to prove he's still alive
+if chef-1 collapses and stops waving → spatula drops → after 10 seconds chef-2 grabs it and starts cooking
+customers (via the waiters) barely notice the gap
+
+the golden spatula = a Redis key with a timer
+that's literally all leader election is. SET leader chef1 NX EX 10 = "put my name on the spatula, auto-drop it in 10 seconds unless I renew"
+
+DR (disaster recovery) story:
+
+waiter dies → nginx stops sending customers there, other waiter handles all of them
+chef dies → standby chef picks up the spatula in ~10 seconds, resumes cooking
+Redis dies → both chefs lose the spatula, both stop cooking (this is the next phase you mentioned — but for now Redis is a single point of failure we accept)
+
+
+
+
+__________________
+
+
+25-03
+
+# terminal A — primary (replaces your current redis command)
+.\redis-server.exe redis-primary.conf
+
+# terminal B — replica
+.\redis-server.exe redis-replica.conf
+
+# terminal C — sentinel
+.\redis-server.exe sentinel.conf --sentinel
+
+
+
+# cd into that folder
+cd C:\Users\Riyansh Sachdev\nginx-1.29.6
+
+# copy your nginx.conf into it
+Copy-Item "D:\Riyansh Sachdev\Documents\chat-backend\nginx.conf" -Destination ".\conf\nginx.conf" -Force
+
+# run it
+.\nginx.exe
+
+
+# in chat-backend folder, compile once to .exe files
+go build -o dataserver.exe ./cmd/dataserver
+go build -o clientserver.exe ./cmd/clientserver
+
+# then run the lightweight exes instead of go run
+$env:FEED_SOURCE="binance"; $env:DATA_PORT="8081"; .\dataserver.exe
+.\clientserver.exe
+```
+
+
+
+
+
+pri-6380
+pri2-6383
+rep-6381
+rep2-6382
+sent1-26380
+sent2-26381
+
+____
+
+# terminal 1 — pair1 primary
+cd "D:\Riyansh Sachdev\Documents\redis"; .\redis-server.exe redis-primary.conf
+# terminal 2 — pair1 replica
+.\redis-server.exe redis-replica.conf
+# terminal 3 — pair1 sentinel
+.\redis-server.exe sentinel.conf --sentinel
+# terminal 4 — pair2 primary
+.\redis-server.exe redis-pair2-primary.conf
+# terminal 5 — pair2 replica
+.\redis-server.exe redis-pair2-replica.conf
+# terminal 6 — pair2 sentinel
+.\redis-server.exe redis-sentinel2.conf --sentinel
+# terminal 7 — nginx
+cd "C:\Users\Riyansh Sachdev\nginx-1.29.6\nginx-1.29.6"; .\nginx.exe
+# terminal 8 — dataserver leader
+$env:FEED_SOURCE="binance"; $env:DATA_PORT="8081"; .\dataserver.exe
+# terminal 9 — dataserver standby
+$env:FEED_SOURCE="binance"; $env:DATA_PORT="8083"; .\dataserver.exe
+# terminal 10 — clientserver
+.\clientserver.exe
+# terminal 11 — clientserver 2 (optional)
+$env:CLIENT_PORT="8082"; .\clientserver.exe
+
+
+
+
+
+
+
+
+
+
+
+
+
