@@ -15,7 +15,7 @@
     --bg-2: #111d33;
     --bg-3: #162440;
     --border: #1e3058;
-    --border-bright: #2a4575;   
+    --border-bright: #2a4575;
     --text-primary: #f3e551;
     --text-secondary: #ffffff;
     --text-dim: #ffffff;
@@ -26,11 +26,57 @@
     --blue: #60a5fa;
     --blue-dim: #1a2a3d;
     --yellow: #fbbf24;
---mono: 'Fira Code', monospace;
-  --sans: 'DM Sans', sans-serif;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
   }
 
   html, body { height: 100%; overflow: hidden; background: var(--bg-0); color: var(--text-primary); font-family: var(--sans); }
+
+  /* ─── LOGIN OVERLAY ──────────────────────────────────── */
+  #login-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg-0);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #login-overlay.hidden { display: none; }
+
+  .login-box {
+    background: var(--bg-1); border: 1px solid var(--border-bright);
+    border-radius: 10px; padding: 40px 36px; width: 360px;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .login-brand {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
+  }
+  .login-title { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .login-sub { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+
+  .login-field { display: flex; flex-direction: column; gap: 6px; }
+  .login-label { font-family: var(--mono); font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+  .login-input {
+    background: var(--bg-2); border: 1px solid var(--border-bright);
+    border-radius: 5px; padding: 10px 14px;
+    font-family: var(--mono); font-size: 13px; color: var(--text-secondary);
+    outline: none; transition: border-color 0.2s;
+  }
+  .login-input:focus { border-color: var(--blue); }
+
+  .login-btn {
+    background: var(--accent); color: #080e1a;
+    border: none; border-radius: 5px; padding: 11px;
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: opacity 0.2s; letter-spacing: 0.05em;
+  }
+  .login-btn:hover { opacity: 0.85; }
+  .login-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .login-error {
+    font-family: var(--mono); font-size: 12px;
+    color: var(--red); background: var(--red-dim);
+    border: 1px solid var(--red); border-radius: 4px;
+    padding: 8px 12px; display: none;
+  }
+  .login-error.visible { display: block; }
 
   /* ─── LAYOUT ─────────────────────────────────────────── */
   #app { display: flex; flex-direction: column; height: 100vh; }
@@ -48,19 +94,30 @@
 
   .topbar-right { display: flex; align-items: center; gap: 20px; }
 
+  /* user badge */
+  .user-badge {
+    font-family: var(--mono); font-size: 11px; color: var(--text-dim);
+    background: var(--bg-3); border: 1px solid var(--border);
+    border-radius: 4px; padding: 3px 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .user-badge-name { color: var(--accent); font-weight: 600; }
+  .logout-btn {
+    background: none; border: none; cursor: pointer;
+    font-family: var(--mono); font-size: 10px; color: var(--text-dim);
+    text-decoration: underline; padding: 0;
+  }
+  .logout-btn:hover { color: var(--red); }
+
   .ws-indicator {
     display: flex; align-items: center; gap: 7px;
     font-family: var(--mono); font-size: 11px; font-weight: 500;
     color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.08em;
   }
-  .ws-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--text-dim); transition: background 0.4s;
-  }
+  .ws-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); transition: background 0.4s; }
   .ws-dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
   .ws-dot.error { background: var(--red); }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.5;} }
-
   .ws-label { color: var(--text-secondary); }
   .ws-label.connected { color: var(--accent); }
   .ws-label.error { color: var(--red); }
@@ -79,7 +136,17 @@
     border-bottom: 1px solid var(--border);
     font-family: var(--mono); font-size: 10px; font-weight: 600;
     color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: space-between;
   }
+
+  /* subscribed filter toggle */
+  .filter-toggle {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+    padding: 2px 7px; border-radius: 3px; cursor: pointer;
+    border: 1px solid var(--border-bright); background: transparent;
+    color: var(--text-dim); transition: all 0.2s;
+  }
+  .filter-toggle.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 
   #search-wrap { padding: 10px 12px; border-bottom: 1px solid var(--border); }
   #search {
@@ -104,15 +171,24 @@
   }
   .instr-item:hover { background: var(--bg-2); }
   .instr-item.active { background: var(--bg-3); border-left-color: var(--accent); }
+  .instr-item.subscribed { border-left-color: var(--blue); }
+  .instr-item.active.subscribed { border-left-color: var(--accent); }
 
+  .instr-left { flex: 1; min-width: 0; }
   .instr-name { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text-primary); }
   .instr-base { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
-  .instr-price {
-    font-family: var(--mono); font-size: 12px; font-weight: 500;
-    color: var(--accent); text-align: right;
-  }
-  .instr-price.negative { color: var(--red); }
+  .instr-right { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+  .instr-price { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--accent); }
   .instr-price.dim { color: var(--text-dim); }
+
+  /* subscribe star button */
+  .sub-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 12px; line-height: 1; padding: 1px 2px;
+    color: var(--text-dim); transition: color 0.2s;
+  }
+  .sub-btn:hover { color: var(--yellow); }
+  .sub-btn.on { color: var(--yellow); }
 
   /* ─── RIGHT PANEL ────────────────────────────────────── */
   #right-panel {
@@ -123,7 +199,6 @@
   #right-panel::-webkit-scrollbar { width: 4px; }
   #right-panel::-webkit-scrollbar-thumb { background: var(--border-bright); }
 
-  /* empty state */
   #empty-state {
     flex: 1; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 12px;
@@ -131,7 +206,6 @@
   }
   #empty-state svg { opacity: 0.2; }
 
-  /* instrument detail */
   #detail { padding: 24px 28px; display: none; }
 
   .detail-header {
@@ -140,15 +214,10 @@
   }
   .detail-title { font-family: var(--mono); font-size: 22px; font-weight: 600; }
   .detail-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
-
   .detail-header-right { text-align: right; }
   .last-updated { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
-  .update-cadence {
-    margin-top: 4px; font-family: var(--mono); font-size: 10px;
-    color: var(--text-dim); letter-spacing: 0.08em;
-  }
+  .update-cadence { margin-top: 4px; font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; }
 
-  /* price hero */
   .price-hero {
     background: var(--bg-1); border: 1px solid var(--border);
     border-radius: 6px; padding: 16px 20px; margin-bottom: 20px;
@@ -157,39 +226,28 @@
   .price-label { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; }
   .price-value {
     font-family: var(--mono); font-size: 32px; font-weight: 600;
-    color: var(--accent); margin-top: 4px;
-    transition: color 0.3s;
+    color: var(--accent); margin-top: 4px; transition: color 0.3s;
   }
   .price-value.flash { animation: flashGreen 0.6s ease; }
   @keyframes flashGreen { 0%{color:#fff; text-shadow:0 0 20px var(--accent);} 100%{color:var(--accent); text-shadow:none;} }
 
-  .ohlc-mini {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px;
-    font-family: var(--mono); font-size: 12px;
-  }
+  .ohlc-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; font-family: var(--mono); font-size: 12px; }
   .ohlc-item { display: flex; flex-direction: column; gap: 2px; }
   .ohlc-k { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
   .ohlc-v { color: var(--text-secondary); }
 
-  /* section label */
   .section-label {
     font-family: var(--mono); font-size: 10px; font-weight: 600;
     color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase;
     margin-bottom: 8px; margin-top: 20px;
   }
 
-  /* indicator cards */
-  .cards-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
-  }
+  .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 
   .ind-card {
     background: var(--bg-1); border: 1px solid var(--border);
     border-radius: 6px; padding: 14px 18px;
-    position: relative; overflow: hidden;
-    transition: border-color 0.3s;
+    position: relative; overflow: hidden; transition: border-color 0.3s;
   }
   .ind-card.flashing { border-color: var(--accent); }
   .ind-card::before {
@@ -198,63 +256,77 @@
   }
   .ind-card.flashing::before { background: var(--accent); }
 
-  .ind-card-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 10px;
-  }
+  .ind-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .ind-name { font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; }
-  .ind-res {
-    font-family: var(--mono); font-size: 9px; color: var(--text-dim);
-    background: var(--bg-3); padding: 2px 6px; border-radius: 3px; letter-spacing: 0.08em;
-  }
+  .ind-res { font-family: var(--mono); font-size: 9px; color: var(--text-dim); background: var(--bg-3); padding: 2px 6px; border-radius: 3px; letter-spacing: 0.08em; }
 
   .ind-rows { display: flex; flex-direction: column; gap: 6px; }
   .ind-row { display: flex; justify-content: space-between; align-items: center; }
   .ind-row-label { font-size: 12px; color: var(--text-secondary); }
-  .ind-row-val {
-    font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--text-primary);
-    transition: color 0.2s;
-  }
+  .ind-row-val { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--text-primary); transition: color 0.2s; }
   .ind-row-val.positive { color: var(--accent); }
   .ind-row-val.negative { color: var(--red); }
   .ind-row-val.neutral { color: var(--yellow); }
   .ind-row-val.dim { color: var(--text-dim); }
-  .ind-row-val.flash-val { animation: valFlash 0.7s ease; }
-  @keyframes valFlash { 0%{opacity:0.2;} 60%{opacity:1;} }
 
-  /* waiting */
   .waiting-badge {
     display: inline-flex; align-items: center; gap: 6px;
     font-family: var(--mono); font-size: 10px; color: var(--text-dim);
-    padding: 3px 8px; background: var(--bg-2); border-radius: 3px;
-    border: 1px solid var(--border);
+    padding: 3px 8px; background: var(--bg-2); border-radius: 3px; border: 1px solid var(--border);
   }
   .waiting-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: pulse 1.5s infinite; }
 
-  /* RSI bar */
   .rsi-bar-wrap { margin-top: 8px; }
   .rsi-bar-track { height: 3px; background: var(--bg-3); border-radius: 2px; position: relative; overflow: visible; }
   .rsi-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s, background 0.5s; }
   .rsi-zones { display: flex; justify-content: space-between; margin-top: 3px; font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
 
-  /* divider */
   .hdivider { border: none; border-top: 1px solid var(--border); margin: 20px 0 0; }
 </style>
 </head>
 <body>
 
+<!-- ─── LOGIN OVERLAY ────────────────────────────────────── -->
+<div id="login-overlay">
+  <div class="login-box">
+    <div>
+      <div class="login-brand">
+        <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+          <path d="M4 20 L10 12 L16 16 L22 6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="22" cy="6" r="2" fill="#4ade80"/>
+        </svg>
+        <span class="login-title">Trradeflow</span>
+      </div>
+      <div class="login-sub">Sign in to your account</div>
+    </div>
+    <div class="login-field">
+      <label class="login-label">Username</label>
+      <input class="login-input" id="login-username" type="text" placeholder="narendra modi" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="login-field">
+      <label class="login-label">Password</label>
+      <input class="login-input" id="login-password" type="password" placeholder="••••••••">
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button class="login-btn" id="login-btn">Sign In</button>
+  </div>
+</div>
+
+<!-- ─── MAIN APP ──────────────────────────────────────────── -->
 <div id="app">
-  <!-- TOPBAR -->
   <div id="topbar">
     <div class="brand">
-      <svg class="brand-icon" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <svg class="brand-icon" viewBox="0 0 28 28" fill="none">
         <path d="M4 20 L10 12 L16 16 L22 6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="22" cy="6" r="2" fill="#4ade80"/>
       </svg>
       <span class="brand-name">Trradeflow</span>
     </div>
-
     <div class="topbar-right">
+      <div class="user-badge" id="user-badge" style="display:none">
+        <span id="user-badge-name"></span>
+        <button class="logout-btn" id="logout-btn">logout</button>
+      </div>
       <div class="ws-indicator">
         <div class="ws-dot" id="ws-dot"></div>
         <span class="ws-label" id="ws-label">CONNECTING</span>
@@ -263,16 +335,17 @@
   </div>
 
   <div id="main">
-    <!-- LEFT PANEL -->
     <div id="left-panel">
-      <div class="panel-header">Instruments</div>
+      <div class="panel-header">
+        Instruments
+        <button class="filter-toggle" id="filter-toggle" title="Show subscribed only">★ MINE</button>
+      </div>
       <div id="search-wrap">
         <input id="search" type="text" placeholder="Search symbols..." autocomplete="off" spellcheck="false">
       </div>
       <div id="instrument-list"></div>
     </div>
 
-    <!-- RIGHT PANEL -->
     <div id="right-panel">
       <div id="empty-state">
         <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
@@ -287,44 +360,56 @@
 
 <script>
 // ──────────────────────────────────────────────────────────
-//  INSTRUMENTS  (top 25 USDT pairs — room IDs match your backend)
+//  CONFIG
+// ──────────────────────────────────────────────────────────
+const API_BASE = "http://192.168.1.71";
+const WS_URL   = "ws://192.168.1.71/ws";
+
+// ──────────────────────────────────────────────────────────
+//  INSTRUMENTS
 // ──────────────────────────────────────────────────────────
 const INSTRUMENTS = [
-  { id: 101, sym: "BTC",   full: "Bitcoin"   },
-  { id: 102, sym: "ETH",   full: "Ethereum"  },
-  { id: 103, sym: "BNB",   full: "BNB"       },
-  { id: 104, sym: "SOL",   full: "Solana"    },
-  { id: 105, sym: "XRP",   full: "XRP"       },
-  { id: 106, sym: "DOGE",  full: "Dogecoin"  },
-  { id: 107, sym: "ADA",   full: "Cardano"   },
-  { id: 108, sym: "AVAX",  full: "Avalanche" },
-  { id: 109, sym: "SHIB",  full: "Shiba Inu" },
-  { id: 110, sym: "DOT",   full: "Polkadot"  },
-  { id: 111, sym: "LINK",  full: "Chainlink" },
-  { id: 112, sym: "LTC",   full: "Litecoin"  },
-  { id: 113, sym: "UNI",   full: "Uniswap"   },
-  { id: 114, sym: "ATOM",  full: "Cosmos"    },
-  { id: 115, sym: "TRX",   full: "TRON"      },
-  { id: 116, sym: "MATIC", full: "Polygon"   },
-  { id: 117, sym: "ICP",   full: "Internet Computer" },
-  { id: 118, sym: "XLM",   full: "Stellar"   },
-  { id: 119, sym: "FIL",   full: "Filecoin"  },
-  { id: 120, sym: "NEAR",  full: "NEAR Protocol" },
-  { id: 121, sym: "APT",   full: "Aptos"     },
-  { id: 122, sym: "ARB",   full: "Arbitrum"  },
-  { id: 123, sym: "OP",    full: "Optimism"  },
-  { id: 124, sym: "INJ",   full: "Injective" },
-  { id: 125, sym: "SUI",   full: "Sui"       },
+  { id: 101, sym: "BTC",   full: "Bitcoin"          },
+  { id: 102, sym: "ETH",   full: "Ethereum"         },
+  { id: 103, sym: "BNB",   full: "BNB"              },
+  { id: 104, sym: "SOL",   full: "Solana"           },
+  { id: 105, sym: "XRP",   full: "XRP"              },
+  { id: 106, sym: "DOGE",  full: "Dogecoin"         },
+  { id: 107, sym: "ADA",   full: "Cardano"          },
+  { id: 108, sym: "AVAX",  full: "Avalanche"        },
+  { id: 109, sym: "SHIB",  full: "Shiba Inu"        },
+  { id: 110, sym: "DOT",   full: "Polkadot"         },
+  { id: 111, sym: "LINK",  full: "Chainlink"        },
+  { id: 112, sym: "LTC",   full: "Litecoin"         },
+  { id: 113, sym: "UNI",   full: "Uniswap"          },
+  { id: 114, sym: "ATOM",  full: "Cosmos"           },
+  { id: 115, sym: "TRX",   full: "TRON"             },
+  { id: 116, sym: "MATIC", full: "Polygon"          },
+  { id: 117, sym: "ICP",   full: "Internet Computer"},
+  { id: 118, sym: "XLM",   full: "Stellar"          },
+  { id: 119, sym: "FIL",   full: "Filecoin"         },
+  { id: 120, sym: "NEAR",  full: "NEAR Protocol"    },
+  { id: 121, sym: "APT",   full: "Aptos"            },
+  { id: 122, sym: "ARB",   full: "Arbitrum"         },
+  { id: 123, sym: "OP",    full: "Optimism"         },
+  { id: 124, sym: "INJ",   full: "Injective"        },
+  { id: 125, sym: "SUI",   full: "Sui"              },
 ];
 
 // ──────────────────────────────────────────────────────────
-//  STATE
+//  SESSION STATE
+// ──────────────────────────────────────────────────────────
+let currentUser = null;        // { id, username, subscriptions: Set<int> }
+let showSubscribedOnly = false;
+
+// ──────────────────────────────────────────────────────────
+//  WEBSOCKET STATE
 // ──────────────────────────────────────────────────────────
 let ws = null;
 let currentRoom = null;
 let reconnectTimer = null;
 
-// Per-instrument indicator state
+// Per-instrument indicator state (active room)
 const state = {
   price: null, open: null, high: null, low: null,
   sma: null, ema: null, rsi: null,
@@ -333,14 +418,128 @@ const state = {
   lastUpdated: null,
 };
 
-// Sidebar prices (just live price per instrument)
 const sidebarPrices = {};
+
+// ──────────────────────────────────────────────────────────
+//  LOGIN
+// ──────────────────────────────────────────────────────────
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-btn');
+
+  if (!username || !password) {
+    showLoginError('Username and password are required.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+  errEl.classList.remove('visible');
+
+  try {
+    const res = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showLoginError(data.error || 'Login failed.');
+      return;
+    }
+
+    // success
+    currentUser = {
+      id: data.id,
+      username: data.username,
+      subscriptions: new Set(data.subscriptions || []),
+    };
+
+    // hide login overlay, show app
+    document.getElementById('login-overlay').classList.add('hidden');
+    document.getElementById('user-badge').style.display = 'flex';
+    document.getElementById('user-badge-name').textContent = currentUser.username;
+
+    renderSidebar();
+    connect();
+
+    // auto-join all subscribed rooms so sidebar prices populate
+    currentUser.subscriptions.forEach(instrId => {
+      setTimeout(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'join', room: String(instrId) }));
+        }
+      }, 800);
+    });
+
+  } catch (e) {
+    showLoginError('Network error. Check backend is running.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+function showLoginError(msg) {
+  const el = document.getElementById('login-error');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+
+function doLogout() {
+  // leave current room
+  if (currentRoom !== null) leaveRoom(currentRoom);
+  if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  clearTimeout(reconnectTimer);
+
+  currentUser = null;
+  currentRoom = null;
+  showSubscribedOnly = false;
+
+  Object.keys(sidebarPrices).forEach(k => delete sidebarPrices[k]);
+  resetState();
+
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('user-badge').style.display = 'none';
+  document.getElementById('detail').style.display = 'none';
+  document.getElementById('empty-state').style.display = '';
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').classList.remove('visible');
+}
+
+// ──────────────────────────────────────────────────────────
+//  SUBSCRIPTION MANAGEMENT
+// ──────────────────────────────────────────────────────────
+async function toggleSubscription(instrId, e) {
+  e.stopPropagation(); // don't select the instrument
+  if (!currentUser) return;
+
+  const isSubbed = currentUser.subscriptions.has(instrId);
+  const endpoint = isSubbed ? '/unsubscribe' : '/subscribe';
+
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: currentUser.id, instrument_id: instrId }),
+    });
+    if (!res.ok) return;
+
+    if (isSubbed) {
+      currentUser.subscriptions.delete(instrId);
+    } else {
+      currentUser.subscriptions.add(instrId);
+    }
+    renderSidebar(document.getElementById('search').value);
+  } catch (_) {}
+}
 
 // ──────────────────────────────────────────────────────────
 //  WEBSOCKET
 // ──────────────────────────────────────────────────────────
-const WS_URL = "ws://192.168.1.71:80/ws";
-
 function connect() {
   setWsStatus('connecting');
   ws = new WebSocket(WS_URL);
@@ -362,22 +561,15 @@ function connect() {
     reconnectTimer = setTimeout(connect, 3000);
   };
 
-  ws.onerror = () => {
-    setWsStatus('error');
-  };
+  ws.onerror = () => { setWsStatus('error'); };
 }
 
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-function joinRoom(roomId) {
-  send({ type: "join", room: String(roomId) });
-}
-
-function leaveRoom(roomId) {
-  send({ type: "leave", room: String(roomId) });
-}
+function joinRoom(roomId) { send({ type: 'join', room: String(roomId) }); }
+function leaveRoom(roomId) { send({ type: 'leave', room: String(roomId) }); }
 
 // ──────────────────────────────────────────────────────────
 //  MESSAGE HANDLER
@@ -387,11 +579,9 @@ function handleMessage(msg) {
   if (!type) return;
 
   switch (type) {
-    // ── HISTORY BURSTS ─────────────────────────────────
     case 'sma_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        // filter 1s points
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.sma = p.value ?? p.sma ?? p; updateDetail(); }
       }
@@ -418,9 +608,9 @@ function handleMessage(msg) {
       if (pts && pts.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
-          state.macd     = p.macd_line  ?? p.macd   ?? null;
-          state.signal   = p.signal_line ?? p.signal ?? null;
-          state.histogram= p.histogram   ?? null;
+          state.macd      = p.macd_line   ?? p.macd   ?? null;
+          state.signal    = p.signal_line ?? p.signal ?? null;
+          state.histogram = p.histogram   ?? null;
           updateDetail();
         }
       }
@@ -429,7 +619,7 @@ function handleMessage(msg) {
     case 'bb_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1s') || lastPoint(pts);
+        const p = lastPoint(pts, '1m') || lastPoint(pts);
         if (p) {
           state.bbUpper  = p.upper  ?? null;
           state.bbMiddle = p.middle ?? null;
@@ -454,30 +644,29 @@ function handleMessage(msg) {
       }
       break;
     }
-
-    // ── LIVE UPDATES ───────────────────────────────────
     case 'sma_update': {
       if (data?.resolution !== '1s') break;
       state.sma = data.value ?? data.sma;
       state.lastUpdated = new Date();
-      flashCard('card-sma');
-      updateDetail();
+      flashCard('card-sma'); updateDetail();
+      // also update sidebar if this is for the active room
+      if (data.instrument_id && currentUser?.subscriptions.has(data.instrument_id)) {
+        updateSidebarPrice(data.instrument_id, sidebarPrices[data.instrument_id]);
+      }
       break;
     }
     case 'ema_update': {
       if (data?.resolution !== '1s') break;
       state.ema = data.value ?? data.ema;
       state.lastUpdated = new Date();
-      flashCard('card-ema');
-      updateDetail();
+      flashCard('card-sma'); updateDetail();
       break;
     }
     case 'rsi_update': {
       if (data?.resolution !== '1s') break;
       state.rsi = data.value ?? data.rsi;
       state.lastUpdated = new Date();
-      flashCard('card-rsi');
-      updateDetail();
+      flashCard('card-rsi'); updateDetail();
       break;
     }
     case 'macd_update': {
@@ -486,8 +675,7 @@ function handleMessage(msg) {
       state.signal    = data.signal_line ?? data.signal ?? state.signal;
       state.histogram = data.histogram   ?? state.histogram;
       state.lastUpdated = new Date();
-      flashCard('card-macd');
-      updateDetail();
+      flashCard('card-macd'); updateDetail();
       break;
     }
     case 'bb_update': {
@@ -496,51 +684,40 @@ function handleMessage(msg) {
       state.bbMiddle = data.middle ?? state.bbMiddle;
       state.bbLower  = data.lower  ?? state.bbLower;
       state.lastUpdated = new Date();
-      flashCard('card-bb');
-      updateDetail();
+      flashCard('card-bb'); updateDetail();
       break;
     }
     case 'ohlc_update': {
-      // accept all resolutions for price
       state.price = data?.close ?? data?.price ?? state.price;
-      if (data?.open)  state.open  = data.open;
-      if (data?.high)  state.high  = data.high;
-      if (data?.low)   state.low   = data.low;
+      if (data?.open) state.open  = data.open;
+      if (data?.high) state.high  = data.high;
+      if (data?.low)  state.low   = data.low;
       if (currentRoom !== null) updateSidebarPrice(currentRoom, state.price);
-      if (data?.resolution === '1s') {
-        state.lastUpdated = new Date();
-        updateDetail();
-      }
+      if (data?.resolution === '1s') { state.lastUpdated = new Date(); updateDetail(); }
       break;
     }
-
-    // ── PRICE TICK (bare price message) ────────────────
     case 'price_update':
     case 'tick': {
       const p = data?.price ?? data?.close ?? data?.value;
       if (p !== undefined) {
         state.price = p;
         if (currentRoom !== null) updateSidebarPrice(currentRoom, p);
-        flashPrice();
-        updateDetail();
+        flashPrice(); updateDetail();
       }
       break;
     }
-
     default: break;
   }
 }
 
 function lastPoint(arr, resolution) {
   if (!arr || !arr.length) return null;
-  const filtered = resolution
-    ? arr.filter(p => p.resolution === resolution)
-    : arr;
+  const filtered = resolution ? arr.filter(p => p.resolution === resolution) : arr;
   return filtered.length ? filtered[filtered.length - 1] : null;
 }
 
 // ──────────────────────────────────────────────────────────
-//  RENDER
+//  RENDER HELPERS
 // ──────────────────────────────────────────────────────────
 function fmt(v, decimals = 2) {
   if (v === null || v === undefined) return null;
@@ -548,17 +725,14 @@ function fmt(v, decimals = 2) {
   if (isNaN(n)) return null;
   return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
-
 function fmtPrice(v) { return v !== null && v !== undefined ? '$' + fmt(v, 4) : null; }
 function fmtTime(d) {
   if (!d) return '—';
   return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
-
 function waiting() {
   return `<span class="waiting-badge"><span class="waiting-dot"></span>waiting</span>`;
 }
-
 function valEl(raw, decimals = 4, colorFn = null) {
   if (raw === null || raw === undefined) return waiting();
   const n = parseFloat(raw);
@@ -567,28 +741,25 @@ function valEl(raw, decimals = 4, colorFn = null) {
   if (colorFn) cls = colorFn(n);
   return `<span class="ind-row-val ${cls}">${display}</span>`;
 }
-
-function rsiColor(v) {
-  if (v >= 70) return 'positive';
-  if (v <= 30) return 'negative';
-  return 'neutral';
-}
-
+function rsiColor(v) { return v >= 70 ? 'positive' : v <= 30 ? 'negative' : 'neutral'; }
 function histColor(v) { return v >= 0 ? 'positive' : 'negative'; }
 
+// ──────────────────────────────────────────────────────────
+//  DETAIL PANEL
+// ──────────────────────────────────────────────────────────
 function updateDetail() {
   const detail = document.getElementById('detail');
   if (!detail.style.display || detail.style.display === 'none') return;
   if (currentRoom === null) return;
-
   const instr = INSTRUMENTS.find(i => i.id === currentRoom);
   if (!instr) return;
 
   const rsiVal = state.rsi !== null ? parseFloat(state.rsi) : null;
   const rsiPct = rsiVal !== null ? Math.min(100, Math.max(0, rsiVal)) : 0;
   const rsiBarColor = rsiVal !== null ? (rsiVal >= 70 ? '#f87171' : rsiVal <= 30 ? '#4ade80' : '#fbbf24') : '#3d4f6a';
-
   const histVal = state.histogram !== null ? parseFloat(state.histogram) : null;
+
+  const isSubbed = currentUser?.subscriptions.has(instr.id);
 
   detail.innerHTML = `
     <div class="detail-header">
@@ -598,11 +769,10 @@ function updateDetail() {
       </div>
       <div class="detail-header-right">
         <div class="last-updated">Last updated: ${fmtTime(state.lastUpdated)}</div>
-        <div class="update-cadence">1s RESOLUTION · LIVE</div>
+        <div class="update-cadence">LIVE · ${currentUser?.username ?? ''}</div>
       </div>
     </div>
 
-    <!-- PRICE HERO -->
     <div class="price-hero">
       <div>
         <div class="price-label">Current Price</div>
@@ -618,39 +788,20 @@ function updateDetail() {
       </div>
     </div>
 
-    <div class="section-label">Indicators · 1s</div>
+    <div class="section-label">Indicators · 1S / BB 1M</div>
 
     <div class="cards-grid">
-
-      <!-- SMA + EMA -->
       <div class="ind-card" id="card-sma">
-        <div class="ind-card-header">
-          <span class="ind-name">Moving Averages</span>
-          <span class="ind-res">1s</span>
-        </div>
+        <div class="ind-card-header"><span class="ind-name">Moving Averages</span><span class="ind-res">1S</span></div>
         <div class="ind-rows">
-          <div class="ind-row">
-            <span class="ind-row-label">SMA (20)</span>
-            ${valEl(state.sma, 4)}
-          </div>
-          <div class="ind-row">
-            <span class="ind-row-label">EMA (20)</span>
-            ${valEl(state.ema, 4)}
-          </div>
+          <div class="ind-row"><span class="ind-row-label">SMA (20)</span>${valEl(state.sma, 4)}</div>
+          <div class="ind-row"><span class="ind-row-label">EMA (20)</span>${valEl(state.ema, 4)}</div>
         </div>
       </div>
-
-      <!-- RSI -->
       <div class="ind-card" id="card-rsi">
-        <div class="ind-card-header">
-          <span class="ind-name">RSI (14)</span>
-          <span class="ind-res">1s</span>
-        </div>
+        <div class="ind-card-header"><span class="ind-name">RSI (14)</span><span class="ind-res">1S</span></div>
         <div class="ind-rows">
-          <div class="ind-row">
-            <span class="ind-row-label">Value</span>
-            ${valEl(state.rsi, 2, rsiColor)}
-          </div>
+          <div class="ind-row"><span class="ind-row-label">Value</span>${valEl(state.rsi, 2, rsiColor)}</div>
         </div>
         ${rsiVal !== null ? `
         <div class="rsi-bar-wrap">
@@ -660,53 +811,26 @@ function updateDetail() {
           <div class="rsi-zones"><span>0</span><span>30</span><span>70</span><span>100</span></div>
         </div>` : ''}
       </div>
-
-      <!-- MACD -->
       <div class="ind-card" id="card-macd">
-        <div class="ind-card-header">
-          <span class="ind-name">MACD (12,26,9)</span>
-          <span class="ind-res">1s</span>
-        </div>
+        <div class="ind-card-header"><span class="ind-name">MACD (12,26,9)</span><span class="ind-res">1S</span></div>
         <div class="ind-rows">
-          <div class="ind-row">
-            <span class="ind-row-label">MACD Line</span>
-            ${valEl(state.macd, 4)}
-          </div>
-          <div class="ind-row">
-            <span class="ind-row-label">Signal Line</span>
-            ${valEl(state.signal, 4)}
-          </div>
+          <div class="ind-row"><span class="ind-row-label">MACD Line</span>${valEl(state.macd, 4)}</div>
+          <div class="ind-row"><span class="ind-row-label">Signal Line</span>${valEl(state.signal, 4)}</div>
           <div class="ind-row">
             <span class="ind-row-label">Histogram</span>
             ${histVal !== null ? `<span class="ind-row-val ${histColor(histVal)}">${histVal >= 0 ? '+' : ''}${fmt(histVal, 4)}</span>` : waiting()}
           </div>
         </div>
       </div>
-
-      <!-- Bollinger Bands -->
       <div class="ind-card" id="card-bb">
-        <div class="ind-card-header">
-          <span class="ind-name">Bollinger Bands (20)</span>
-          <span class="ind-res">1m</span>
-        </div>
+        <div class="ind-card-header"><span class="ind-name">Bollinger Bands (20)</span><span class="ind-res">1M</span></div>
         <div class="ind-rows">
-          <div class="ind-row">
-            <span class="ind-row-label">Upper Band</span>
-            ${valEl(state.bbUpper, 4)}
-          </div>
-          <div class="ind-row">
-            <span class="ind-row-label">Middle Band</span>
-            ${valEl(state.bbMiddle, 4)}
-          </div>
-          <div class="ind-row">
-            <span class="ind-row-label">Lower Band</span>
-            ${valEl(state.bbLower, 4)}
-          </div>
+          <div class="ind-row"><span class="ind-row-label">Upper Band</span>${valEl(state.bbUpper, 4)}</div>
+          <div class="ind-row"><span class="ind-row-label">Middle Band</span>${valEl(state.bbMiddle, 4)}</div>
+          <div class="ind-row"><span class="ind-row-label">Lower Band</span>${valEl(state.bbLower, 4)}</div>
         </div>
       </div>
-
     </div>
-
     <hr class="hdivider">
   `;
 }
@@ -715,7 +839,7 @@ function flashCard(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.classList.remove('flashing');
-  void el.offsetWidth; // reflow
+  void el.offsetWidth;
   el.classList.add('flashing');
   setTimeout(() => el.classList.remove('flashing'), 1200);
 }
@@ -734,21 +858,26 @@ function flashPrice() {
 function renderSidebar(filter = '') {
   const list = document.getElementById('instrument-list');
   const f = filter.trim().toUpperCase();
-  const filtered = INSTRUMENTS.filter(i =>
-    !f || i.sym.includes(f) || i.full.toUpperCase().includes(f)
-  );
+  let items = INSTRUMENTS.filter(i => !f || i.sym.includes(f) || i.full.toUpperCase().includes(f));
+  if (showSubscribedOnly && currentUser) {
+    items = items.filter(i => currentUser.subscriptions.has(i.id));
+  }
 
-  list.innerHTML = filtered.map(instr => {
+  list.innerHTML = items.map(instr => {
     const price = sidebarPrices[instr.id];
     const active = currentRoom === instr.id;
+    const isSubbed = currentUser?.subscriptions.has(instr.id) ?? false;
     const priceStr = price !== undefined ? `$${fmt(price, 2)}` : '—';
     return `
-      <div class="instr-item${active ? ' active' : ''}" data-id="${instr.id}">
-        <div>
+      <div class="instr-item${active ? ' active' : ''}${isSubbed ? ' subscribed' : ''}" data-id="${instr.id}">
+        <div class="instr-left">
           <div class="instr-name">${instr.sym}/USDT</div>
           <div class="instr-base">${instr.full}</div>
         </div>
-        <div class="instr-price${price === undefined ? ' dim' : ''}">${priceStr}</div>
+        <div class="instr-right">
+          <div class="instr-price${price === undefined ? ' dim' : ''}">${priceStr}</div>
+          <button class="sub-btn${isSubbed ? ' on' : ''}" data-id="${instr.id}" title="${isSubbed ? 'Unsubscribe' : 'Subscribe'}">★</button>
+        </div>
       </div>
     `;
   }).join('');
@@ -756,12 +885,14 @@ function renderSidebar(filter = '') {
   list.querySelectorAll('.instr-item').forEach(el => {
     el.addEventListener('click', () => selectInstrument(parseInt(el.dataset.id)));
   });
+  list.querySelectorAll('.sub-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => toggleSubscription(parseInt(btn.dataset.id), e));
+  });
 }
 
 function updateSidebarPrice(instrId, price) {
   if (price === null || price === undefined) return;
   sidebarPrices[instrId] = parseFloat(price);
-  // patch just the price cell without full re-render
   const el = document.querySelector(`.instr-item[data-id="${instrId}"] .instr-price`);
   if (el) {
     el.textContent = '$' + fmt(price, 2);
@@ -782,26 +913,14 @@ function resetState() {
 
 function selectInstrument(id) {
   if (currentRoom === id) return;
-
-  // leave old room
   if (currentRoom !== null) leaveRoom(currentRoom);
-
   currentRoom = id;
   resetState();
 
-  // show detail panel
-  const empty = document.getElementById('empty-state');
-  const detail = document.getElementById('detail');
-  empty.style.display = 'none';
-  detail.style.display = 'block';
-
-  // initial skeleton render
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('detail').style.display = 'block';
   updateDetail();
-
-  // update sidebar active state
   renderSidebar(document.getElementById('search').value);
-
-  // join new room
   joinRoom(id);
 }
 
@@ -809,16 +928,15 @@ function selectInstrument(id) {
 //  WS STATUS UI
 // ──────────────────────────────────────────────────────────
 function setWsStatus(status) {
-  const dot = document.getElementById('ws-dot');
+  const dot   = document.getElementById('ws-dot');
   const label = document.getElementById('ws-label');
   dot.className = 'ws-dot';
   label.className = 'ws-label';
-
   const map = {
-    connecting:   { cls: '',          text: 'CONNECTING' },
-    connected:    { cls: 'connected', text: 'CONNECTED'  },
+    connecting:   { cls: '',          text: 'CONNECTING'   },
+    connected:    { cls: 'connected', text: 'CONNECTED'    },
     disconnected: { cls: '',          text: 'RECONNECTING' },
-    error:        { cls: 'error',     text: 'ERROR'      },
+    error:        { cls: 'error',     text: 'ERROR'        },
   };
   const s = map[status] || map.connecting;
   if (s.cls) { dot.classList.add(s.cls); label.classList.add(s.cls); }
@@ -829,13 +947,24 @@ function setWsStatus(status) {
 //  BOOT
 // ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  renderSidebar();
+  // login
+  document.getElementById('login-btn').addEventListener('click', doLogin);
+  document.getElementById('login-password').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('logout-btn').addEventListener('click', doLogout);
 
+  // filter toggle
+  document.getElementById('filter-toggle').addEventListener('click', () => {
+    showSubscribedOnly = !showSubscribedOnly;
+    document.getElementById('filter-toggle').classList.toggle('active', showSubscribedOnly);
+    renderSidebar(document.getElementById('search').value);
+  });
+
+  // search
   document.getElementById('search').addEventListener('input', (e) => {
     renderSidebar(e.target.value);
   });
-
-  connect();
 });
 </script>
 </body>
