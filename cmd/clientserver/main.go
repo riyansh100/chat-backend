@@ -1,3 +1,4 @@
+// cmd/clientserver/main.go
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/riyansh/chat-backend/internal/auth"
 	"github.com/riyansh/chat-backend/internal/history"
 	"github.com/riyansh/chat-backend/internal/hub"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
@@ -70,9 +72,19 @@ func main() {
 	go h.Run()
 	log.Println("[ClientServer] hub running (no engines)")
 
+	// ---- history ----
 	histStore := history.NewStore(lb, pool)
 	http.HandleFunc("/history", history.Handler(histStore))
 
+	// ---- auth routes ----
+	authStore := auth.NewStore(pool)
+	authHandler := auth.NewHandler(authStore, histStore, lb)
+	http.HandleFunc("/login", authHandler.Login)
+	http.HandleFunc("/subscribe", authHandler.Subscribe)
+	http.HandleFunc("/unsubscribe", authHandler.Unsubscribe)
+	http.HandleFunc("/subscriptions", authHandler.GetSubscriptions)
+
+	// ---- websocket ----
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, w, r)
 	})
