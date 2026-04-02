@@ -645,16 +645,14 @@ function handleMessage(msg) {
       break;
     }
     case 'sma_update': {
-      if (data?.resolution !== '1s') break;
-      state.sma = data.value ?? data.sma;
-      state.lastUpdated = new Date();
-      flashCard('card-sma'); updateDetail();
-      // also update sidebar if this is for the active room
-      if (data.instrument_id && currentUser?.subscriptions.has(data.instrument_id)) {
-        updateSidebarPrice(data.instrument_id, sidebarPrices[data.instrument_id]);
-      }
-      break;
-    }
+  if (data?.resolution !== '1s') break;
+  state.sma = data.value ?? data.sma;
+  // derive approximate price from SMA as placeholder until ohlc arrives
+  if (state.price === null) { state.price = data.value; updateSidebarPrice(currentRoom, data.value); }
+  state.lastUpdated = new Date();
+  flashCard('card-sma'); updateDetail();
+  break;
+}
     case 'ema_update': {
       if (data?.resolution !== '1s') break;
       state.ema = data.value ?? data.ema;
@@ -693,7 +691,7 @@ function handleMessage(msg) {
       if (data?.high) state.high  = data.high;
       if (data?.low)  state.low   = data.low;
       if (currentRoom !== null) updateSidebarPrice(currentRoom, state.price);
-      if (data?.resolution === '1s') { state.lastUpdated = new Date(); updateDetail(); }
+      state.lastUpdated = new Date(); updateDetail();
       break;
     }
     case 'price_update':
@@ -706,7 +704,16 @@ function handleMessage(msg) {
       }
       break;
     }
-    default: break;
+    default: {
+  // warm-start message: type = room ID, data = last price payload
+  if (type === String(currentRoom) && data?.price) {
+    state.price = data.price;
+    updateSidebarPrice(currentRoom, data.price);
+    flashPrice();
+    updateDetail();
+  }
+  break;
+}
   }
 }
 
