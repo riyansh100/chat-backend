@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TradeFlow — Market Dashboard</title>
+<title>Trradeflow — Market Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -251,7 +251,7 @@
         <path d="M4 20 L10 12 L16 16 L22 6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
         <circle cx="22" cy="6" r="2" fill="#4ade80"/>
       </svg>
-      <span class="brand-name">TradeFlow</span>
+      <span class="brand-name">Trradeflow</span>
     </div>
 
     <div class="topbar-right">
@@ -290,31 +290,31 @@
 //  INSTRUMENTS  (top 25 USDT pairs — room IDs match your backend)
 // ──────────────────────────────────────────────────────────
 const INSTRUMENTS = [
-  { id: 1,   sym: "BTC",   full: "Bitcoin"   },
-  { id: 2,   sym: "ETH",   full: "Ethereum"  },
-  { id: 3,   sym: "BNB",   full: "BNB"       },
-  { id: 4,   sym: "SOL",   full: "Solana"    },
-  { id: 5,   sym: "XRP",   full: "XRP"       },
-  { id: 6,   sym: "DOGE",  full: "Dogecoin"  },
-  { id: 7,   sym: "ADA",   full: "Cardano"   },
-  { id: 8,   sym: "AVAX",  full: "Avalanche" },
-  { id: 9,   sym: "SHIB",  full: "Shiba Inu" },
-  { id: 10,  sym: "DOT",   full: "Polkadot"  },
-  { id: 11,  sym: "LINK",  full: "Chainlink" },
-  { id: 12,  sym: "LTC",   full: "Litecoin"  },
-  { id: 13,  sym: "UNI",   full: "Uniswap"   },
-  { id: 14,  sym: "ATOM",  full: "Cosmos"    },
-  { id: 15,  sym: "TRX",   full: "TRON"      },
-  { id: 16,  sym: "MATIC", full: "Polygon"   },
-  { id: 17,  sym: "ICP",   full: "Internet Computer" },
-  { id: 18,  sym: "XLM",   full: "Stellar"   },
-  { id: 19,  sym: "FIL",   full: "Filecoin"  },
-  { id: 20,  sym: "NEAR",  full: "NEAR Protocol" },
-  { id: 21,  sym: "APT",   full: "Aptos"     },
-  { id: 22,  sym: "ARB",   full: "Arbitrum"  },
-  { id: 23,  sym: "OP",    full: "Optimism"  },
-  { id: 24,  sym: "INJ",   full: "Injective" },
-  { id: 25,  sym: "SUI",   full: "Sui"       },
+  { id: 101, sym: "BTC",   full: "Bitcoin"   },
+  { id: 102, sym: "ETH",   full: "Ethereum"  },
+  { id: 103, sym: "BNB",   full: "BNB"       },
+  { id: 104, sym: "SOL",   full: "Solana"    },
+  { id: 105, sym: "XRP",   full: "XRP"       },
+  { id: 106, sym: "DOGE",  full: "Dogecoin"  },
+  { id: 107, sym: "ADA",   full: "Cardano"   },
+  { id: 108, sym: "AVAX",  full: "Avalanche" },
+  { id: 109, sym: "SHIB",  full: "Shiba Inu" },
+  { id: 110, sym: "DOT",   full: "Polkadot"  },
+  { id: 111, sym: "LINK",  full: "Chainlink" },
+  { id: 112, sym: "LTC",   full: "Litecoin"  },
+  { id: 113, sym: "UNI",   full: "Uniswap"   },
+  { id: 114, sym: "ATOM",  full: "Cosmos"    },
+  { id: 115, sym: "TRX",   full: "TRON"      },
+  { id: 116, sym: "MATIC", full: "Polygon"   },
+  { id: 117, sym: "ICP",   full: "Internet Computer" },
+  { id: 118, sym: "XLM",   full: "Stellar"   },
+  { id: 119, sym: "FIL",   full: "Filecoin"  },
+  { id: 120, sym: "NEAR",  full: "NEAR Protocol" },
+  { id: 121, sym: "APT",   full: "Aptos"     },
+  { id: 122, sym: "ARB",   full: "Arbitrum"  },
+  { id: 123, sym: "OP",    full: "Optimism"  },
+  { id: 124, sym: "INJ",   full: "Injective" },
+  { id: 125, sym: "SUI",   full: "Sui"       },
 ];
 
 // ──────────────────────────────────────────────────────────
@@ -339,7 +339,7 @@ const sidebarPrices = {};
 // ──────────────────────────────────────────────────────────
 //  WEBSOCKET
 // ──────────────────────────────────────────────────────────
-const WS_URL = "ws://localhost:80/ws";
+const WS_URL = "ws://192.168.1.71:80/ws";
 
 function connect() {
   setWsStatus('connecting');
@@ -391,8 +391,8 @@ function handleMessage(msg) {
     case 'sma_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        // filter 1m points
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        // filter 1s points
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.sma = p.value ?? p.sma ?? p; updateDetail(); }
       }
       break;
@@ -400,7 +400,7 @@ function handleMessage(msg) {
     case 'ema_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.ema = p.value ?? p.ema ?? p; updateDetail(); }
       }
       break;
@@ -408,7 +408,7 @@ function handleMessage(msg) {
     case 'rsi_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.rsi = p.value ?? p.rsi ?? p; updateDetail(); }
       }
       break;
@@ -416,7 +416,7 @@ function handleMessage(msg) {
     case 'macd_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
           state.macd     = p.macd_line  ?? p.macd   ?? null;
           state.signal   = p.signal_line ?? p.signal ?? null;
@@ -429,7 +429,7 @@ function handleMessage(msg) {
     case 'bb_history': {
       const pts = data?.points;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
           state.bbUpper  = p.upper  ?? null;
           state.bbMiddle = p.middle ?? null;
@@ -442,7 +442,7 @@ function handleMessage(msg) {
     case 'ohlc_history': {
       const pts = data?.points ?? data?.candles;
       if (pts && pts.length) {
-        const p = lastPoint(pts, '1m') || lastPoint(pts);
+        const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
           state.price = p.close ?? state.price;
           state.open  = p.open  ?? null;
@@ -457,7 +457,7 @@ function handleMessage(msg) {
 
     // ── LIVE UPDATES ───────────────────────────────────
     case 'sma_update': {
-      if (data?.resolution !== '1m') break;
+      if (data?.resolution !== '1s') break;
       state.sma = data.value ?? data.sma;
       state.lastUpdated = new Date();
       flashCard('card-sma');
@@ -465,7 +465,7 @@ function handleMessage(msg) {
       break;
     }
     case 'ema_update': {
-      if (data?.resolution !== '1m') break;
+      if (data?.resolution !== '1s') break;
       state.ema = data.value ?? data.ema;
       state.lastUpdated = new Date();
       flashCard('card-ema');
@@ -473,7 +473,7 @@ function handleMessage(msg) {
       break;
     }
     case 'rsi_update': {
-      if (data?.resolution !== '1m') break;
+      if (data?.resolution !== '1s') break;
       state.rsi = data.value ?? data.rsi;
       state.lastUpdated = new Date();
       flashCard('card-rsi');
@@ -481,7 +481,7 @@ function handleMessage(msg) {
       break;
     }
     case 'macd_update': {
-      if (data?.resolution !== '1m') break;
+      if (data?.resolution !== '1s') break;
       state.macd      = data.macd_line   ?? data.macd   ?? state.macd;
       state.signal    = data.signal_line ?? data.signal ?? state.signal;
       state.histogram = data.histogram   ?? state.histogram;
@@ -507,7 +507,7 @@ function handleMessage(msg) {
       if (data?.high)  state.high  = data.high;
       if (data?.low)   state.low   = data.low;
       if (currentRoom !== null) updateSidebarPrice(currentRoom, state.price);
-      if (data?.resolution === '1m') {
+      if (data?.resolution === '1s') {
         state.lastUpdated = new Date();
         updateDetail();
       }
@@ -598,7 +598,7 @@ function updateDetail() {
       </div>
       <div class="detail-header-right">
         <div class="last-updated">Last updated: ${fmtTime(state.lastUpdated)}</div>
-        <div class="update-cadence">1M RESOLUTION · LIVE</div>
+        <div class="update-cadence">1s RESOLUTION · LIVE</div>
       </div>
     </div>
 
@@ -618,7 +618,7 @@ function updateDetail() {
       </div>
     </div>
 
-    <div class="section-label">Indicators · 1M</div>
+    <div class="section-label">Indicators · 1s</div>
 
     <div class="cards-grid">
 
@@ -626,7 +626,7 @@ function updateDetail() {
       <div class="ind-card" id="card-sma">
         <div class="ind-card-header">
           <span class="ind-name">Moving Averages</span>
-          <span class="ind-res">1M</span>
+          <span class="ind-res">1s</span>
         </div>
         <div class="ind-rows">
           <div class="ind-row">
@@ -644,7 +644,7 @@ function updateDetail() {
       <div class="ind-card" id="card-rsi">
         <div class="ind-card-header">
           <span class="ind-name">RSI (14)</span>
-          <span class="ind-res">1M</span>
+          <span class="ind-res">1s</span>
         </div>
         <div class="ind-rows">
           <div class="ind-row">
@@ -665,7 +665,7 @@ function updateDetail() {
       <div class="ind-card" id="card-macd">
         <div class="ind-card-header">
           <span class="ind-name">MACD (12,26,9)</span>
-          <span class="ind-res">1M</span>
+          <span class="ind-res">1s</span>
         </div>
         <div class="ind-rows">
           <div class="ind-row">
@@ -687,7 +687,7 @@ function updateDetail() {
       <div class="ind-card" id="card-bb">
         <div class="ind-card-header">
           <span class="ind-name">Bollinger Bands (20)</span>
-          <span class="ind-res">1M</span>
+          <span class="ind-res">1m</span>
         </div>
         <div class="ind-rows">
           <div class="ind-row">
