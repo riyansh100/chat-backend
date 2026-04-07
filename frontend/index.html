@@ -45,9 +45,7 @@
     border-radius: 10px; padding: 40px 36px; width: 360px;
     display: flex; flex-direction: column; gap: 20px;
   }
-  .login-brand {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 4px;
-  }
+  .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
   .login-title { font-family: var(--mono); font-size: 20px; font-weight: 600; }
   .login-sub { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
 
@@ -94,7 +92,6 @@
 
   .topbar-right { display: flex; align-items: center; gap: 20px; }
 
-  /* user badge */
   .user-badge {
     font-family: var(--mono); font-size: 11px; color: var(--text-dim);
     background: var(--bg-3); border: 1px solid var(--border);
@@ -139,7 +136,6 @@
     display: flex; align-items: center; justify-content: space-between;
   }
 
-  /* subscribed filter toggle */
   .filter-toggle {
     font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
     padding: 2px 7px; border-radius: 3px; cursor: pointer;
@@ -181,7 +177,13 @@
   .instr-price { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--accent); }
   .instr-price.dim { color: var(--text-dim); }
 
-  /* subscribe star button */
+  /* price flash animation for sidebar */
+  @keyframes sidebarFlash {
+    0%   { color: #fff; }
+    100% { color: var(--accent); }
+  }
+  .instr-price.tick { animation: sidebarFlash 0.4s ease; }
+
   .sub-btn {
     background: none; border: none; cursor: pointer;
     font-size: 12px; line-height: 1; padding: 1px 2px;
@@ -281,6 +283,30 @@
   .rsi-bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s, background 0.5s; }
   .rsi-zones { display: flex; justify-content: space-between; margin-top: 3px; font-family: var(--mono); font-size: 9px; color: var(--text-dim); }
 
+  /* ─── SUBSCRIBE GATE ─────────────────────────────────── */
+  .subscribe-gate {
+    margin-top: 4px;
+    background: var(--bg-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 36px 28px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; text-align: center;
+  }
+  .subscribe-gate-icon { font-size: 32px; opacity: 0.5; }
+  .subscribe-gate-title {
+    font-family: var(--mono); font-size: 14px; font-weight: 600;
+    color: var(--text-secondary); letter-spacing: 0.05em;
+  }
+  .subscribe-gate-sub { font-size: 12px; color: var(--text-dim); line-height: 1.6; max-width: 320px; }
+  .subscribe-gate-btn {
+    margin-top: 4px;
+    background: var(--accent-dim); border: 1px solid var(--accent);
+    color: var(--accent); border-radius: 5px; padding: 9px 22px;
+    font-family: var(--mono); font-size: 12px; font-weight: 600;
+    cursor: pointer; letter-spacing: 0.08em; transition: background 0.2s, opacity 0.2s;
+  }
+  .subscribe-gate-btn:hover { background: var(--accent); color: #080e1a; }
+  .subscribe-gate-btn.loading { opacity: 0.5; cursor: not-allowed; }
+
   .hdivider { border: none; border-top: 1px solid var(--border); margin: 20px 0 0; }
 </style>
 </head>
@@ -369,31 +395,31 @@ const WS_URL   = "ws://192.168.1.71/ws";
 //  INSTRUMENTS
 // ──────────────────────────────────────────────────────────
 const INSTRUMENTS = [
-  { id: 101, sym: "BTC",   full: "Bitcoin"          },
-  { id: 102, sym: "ETH",   full: "Ethereum"         },
-  { id: 103, sym: "BNB",   full: "BNB"              },
-  { id: 104, sym: "SOL",   full: "Solana"           },
-  { id: 105, sym: "XRP",   full: "XRP"              },
-  { id: 106, sym: "DOGE",  full: "Dogecoin"         },
-  { id: 107, sym: "ADA",   full: "Cardano"          },
-  { id: 108, sym: "AVAX",  full: "Avalanche"        },
-  { id: 109, sym: "SHIB",  full: "Shiba Inu"        },
-  { id: 110, sym: "DOT",   full: "Polkadot"         },
-  { id: 111, sym: "LINK",  full: "Chainlink"        },
-  { id: 112, sym: "LTC",   full: "Litecoin"         },
-  { id: 113, sym: "UNI",   full: "Uniswap"          },
-  { id: 114, sym: "ATOM",  full: "Cosmos"           },
-  { id: 115, sym: "TRX",   full: "TRON"             },
-  { id: 116, sym: "MATIC", full: "Polygon"          },
-  { id: 117, sym: "ICP",   full: "Internet Computer"},
-  { id: 118, sym: "XLM",   full: "Stellar"          },
-  { id: 119, sym: "FIL",   full: "Filecoin"         },
-  { id: 120, sym: "NEAR",  full: "NEAR Protocol"    },
-  { id: 121, sym: "APT",   full: "Aptos"            },
-  { id: 122, sym: "ARB",   full: "Arbitrum"         },
-  { id: 123, sym: "OP",    full: "Optimism"         },
-  { id: 124, sym: "INJ",   full: "Injective"        },
-  { id: 125, sym: "SUI",   full: "Sui"              },
+  { id: 101, sym: "BTC",   full: "Bitcoin"           },
+  { id: 102, sym: "ETH",   full: "Ethereum"          },
+  { id: 103, sym: "BNB",   full: "BNB"               },
+  { id: 104, sym: "SOL",   full: "Solana"            },
+  { id: 105, sym: "XRP",   full: "XRP"               },
+  { id: 106, sym: "DOGE",  full: "Dogecoin"          },
+  { id: 107, sym: "ADA",   full: "Cardano"           },
+  { id: 108, sym: "AVAX",  full: "Avalanche"         },
+  { id: 109, sym: "SHIB",  full: "Shiba Inu"         },
+  { id: 110, sym: "DOT",   full: "Polkadot"          },
+  { id: 111, sym: "LINK",  full: "Chainlink"         },
+  { id: 112, sym: "LTC",   full: "Litecoin"          },
+  { id: 113, sym: "UNI",   full: "Uniswap"           },
+  { id: 114, sym: "ATOM",  full: "Cosmos"            },
+  { id: 115, sym: "TRX",   full: "TRON"              },
+  { id: 116, sym: "MATIC", full: "Polygon"           },
+  { id: 117, sym: "ICP",   full: "Internet Computer" },
+  { id: 118, sym: "XLM",   full: "Stellar"           },
+  { id: 119, sym: "FIL",   full: "Filecoin"          },
+  { id: 120, sym: "NEAR",  full: "NEAR Protocol"     },
+  { id: 121, sym: "APT",   full: "Aptos"             },
+  { id: 122, sym: "ARB",   full: "Arbitrum"          },
+  { id: 123, sym: "OP",    full: "Optimism"          },
+  { id: 124, sym: "INJ",   full: "Injective"         },
+  { id: 125, sym: "SUI",   full: "Sui"               },
 ];
 
 // ──────────────────────────────────────────────────────────
@@ -406,10 +432,10 @@ let showSubscribedOnly = false;
 //  WEBSOCKET STATE
 // ──────────────────────────────────────────────────────────
 let ws = null;
-let currentRoom = null;
+let currentRoom = null;        // the currently-selected instrument (RHS detail panel)
 let reconnectTimer = null;
 
-// Per-instrument indicator state (active room)
+// Per-instrument indicator state (only active room)
 const state = {
   price: null, open: null, high: null, low: null,
   sma: null, ema: null, rsi: null,
@@ -418,6 +444,7 @@ const state = {
   lastUpdated: null,
 };
 
+// Sidebar prices — tracked for ALL 25 instruments
 const sidebarPrices = {};
 
 // ──────────────────────────────────────────────────────────
@@ -429,50 +456,33 @@ async function doLogin() {
   const errEl    = document.getElementById('login-error');
   const btn      = document.getElementById('login-btn');
 
-  if (!username || !password) {
-    showLoginError('Username and password are required.');
-    return;
-  }
+  if (!username || !password) { showLoginError('Username and password are required.'); return; }
 
   btn.disabled = true;
   btn.textContent = 'Signing in...';
   errEl.classList.remove('visible');
 
   try {
-    const res = await fetch(`${API_BASE}/login`, {
+    const res  = await fetch(`${API_BASE}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     const data = await res.json();
-    if (!res.ok) {
-      showLoginError(data.error || 'Login failed.');
-      return;
-    }
+    if (!res.ok) { showLoginError(data.error || 'Login failed.'); return; }
 
-    // success
     currentUser = {
       id: data.id,
       username: data.username,
       subscriptions: new Set(data.subscriptions || []),
     };
 
-    // hide login overlay, show app
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('user-badge').style.display = 'flex';
     document.getElementById('user-badge-name').textContent = currentUser.username;
 
     renderSidebar();
-    connect();
-
-    // auto-join all subscribed rooms so sidebar prices populate
-    currentUser.subscriptions.forEach(instrId => {
-      setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'join', room: String(instrId) }));
-        }
-      }, 800);
-    });
+    connect();   // WS connect; joinAll25 is called from onopen
 
   } catch (e) {
     showLoginError('Network error. Check backend is running.');
@@ -489,8 +499,6 @@ function showLoginError(msg) {
 }
 
 function doLogout() {
-  // leave current room
-  if (currentRoom !== null) leaveRoom(currentRoom);
   if (ws) { ws.onclose = null; ws.close(); ws = null; }
   clearTimeout(reconnectTimer);
 
@@ -514,11 +522,11 @@ function doLogout() {
 //  SUBSCRIPTION MANAGEMENT
 // ──────────────────────────────────────────────────────────
 async function toggleSubscription(instrId, e) {
-  e.stopPropagation(); // don't select the instrument
+  if (e) e.stopPropagation();
   if (!currentUser) return;
 
-  const isSubbed = currentUser.subscriptions.has(instrId);
-  const endpoint = isSubbed ? '/unsubscribe' : '/subscribe';
+  const isSubbed   = currentUser.subscriptions.has(instrId);
+  const endpoint   = isSubbed ? '/unsubscribe' : '/subscribe';
 
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -533,7 +541,14 @@ async function toggleSubscription(instrId, e) {
     } else {
       currentUser.subscriptions.add(instrId);
     }
+
     renderSidebar(document.getElementById('search').value);
+
+    // If the user just subscribed to the currently-viewed instrument,
+    // re-render the RHS to replace the gate with full indicators
+    if (instrId === currentRoom) {
+      updateDetail();
+    }
   } catch (_) {}
 }
 
@@ -547,6 +562,11 @@ function connect() {
   ws.onopen = () => {
     setWsStatus('connected');
     clearTimeout(reconnectTimer);
+
+    // Join ALL 25 rooms immediately — sidebar prices for everyone
+    joinAll25();
+
+    // Re-join current detail room if one was active (e.g. after reconnect)
     if (currentRoom !== null) joinRoom(currentRoom);
   };
 
@@ -564,24 +584,66 @@ function connect() {
   ws.onerror = () => { setWsStatus('error'); };
 }
 
+// Join all 25 instrument rooms for passive price feed
+function joinAll25() {
+  INSTRUMENTS.forEach(instr => {
+    send({ type: 'join', room: String(instr.id) });
+  });
+}
+
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
 
-function joinRoom(roomId) { send({ type: 'join', room: String(roomId) }); }
+function joinRoom(roomId)  { send({ type: 'join',  room: String(roomId) }); }
 function leaveRoom(roomId) { send({ type: 'leave', room: String(roomId) }); }
 
 // ──────────────────────────────────────────────────────────
 //  MESSAGE HANDLER
 // ──────────────────────────────────────────────────────────
+// extractPrice: parse a price value from common message shapes
+function extractPrice(data) {
+  if (!data) return null;
+  const v = data.close ?? data.price ?? data.value ?? data.sma ?? data.ema ?? null;
+  if (v === null || v === undefined) return null;
+  const n = parseFloat(v);
+  return isNaN(n) ? null : n;
+}
+
+// getRoomFromMsg: figure out which instrument this message belongs to
+// data.instrument_id, data.instrument, or the type string itself
+function getRoomFromMsg(type, data) {
+  if (data?.instrument_id) return parseInt(data.instrument_id);
+  if (data?.instrument)    return parseInt(data.instrument);
+  // warm-start: type IS the room id string (e.g. "101")
+  const n = parseInt(type);
+  if (!isNaN(n) && n >= 101 && n <= 125) return n;
+  return null;
+}
+
 function handleMessage(msg) {
   const { type, data } = msg;
   if (!type) return;
 
+  // ── 1. ALWAYS update sidebar price for any instrument, any message ──
+  const msgRoom  = getRoomFromMsg(type, data);
+  const msgPrice = extractPrice(data);
+
+  if (msgRoom !== null && msgPrice !== null) {
+    updateSidebarPrice(msgRoom, msgPrice);
+  }
+
+  // ── 2. Indicator state updates — only when it concerns currentRoom ──
+  if (msgRoom !== null && msgRoom !== currentRoom) {
+    // It's a background room tick. Sidebar already updated above. Done.
+    return;
+  }
+
   switch (type) {
+    // ── HISTORY messages ──
     case 'sma_history': {
       const pts = data?.points;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.sma = p.value ?? p.sma ?? p; updateDetail(); }
       }
@@ -589,7 +651,7 @@ function handleMessage(msg) {
     }
     case 'ema_history': {
       const pts = data?.points;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.ema = p.value ?? p.ema ?? p; updateDetail(); }
       }
@@ -597,7 +659,7 @@ function handleMessage(msg) {
     }
     case 'rsi_history': {
       const pts = data?.points;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) { state.rsi = p.value ?? p.rsi ?? p; updateDetail(); }
       }
@@ -605,7 +667,7 @@ function handleMessage(msg) {
     }
     case 'macd_history': {
       const pts = data?.points;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
           state.macd      = p.macd_line   ?? p.macd   ?? null;
@@ -618,7 +680,7 @@ function handleMessage(msg) {
     }
     case 'bb_history': {
       const pts = data?.points;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1m') || lastPoint(pts);
         if (p) {
           state.bbUpper  = p.upper  ?? null;
@@ -631,7 +693,7 @@ function handleMessage(msg) {
     }
     case 'ohlc_history': {
       const pts = data?.points ?? data?.candles;
-      if (pts && pts.length) {
+      if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
           state.price = p.close ?? state.price;
@@ -644,15 +706,16 @@ function handleMessage(msg) {
       }
       break;
     }
+
+    // ── LIVE UPDATE messages ──
     case 'sma_update': {
-  if (data?.resolution !== '1s') break;
-  state.sma = data.value ?? data.sma;
-  // derive approximate price from SMA as placeholder until ohlc arrives
-  if (state.price === null) { state.price = data.value; updateSidebarPrice(currentRoom, data.value); }
-  state.lastUpdated = new Date();
-  flashCard('card-sma'); updateDetail();
-  break;
-}
+      if (data?.resolution !== '1s') break;
+      state.sma = data.value ?? data.sma;
+      if (state.price === null) { state.price = data.value; updateSidebarPrice(currentRoom, data.value); }
+      state.lastUpdated = new Date();
+      flashCard('card-sma'); updateDetail();
+      break;
+    }
     case 'ema_update': {
       if (data?.resolution !== '1s') break;
       state.ema = data.value ?? data.ema;
@@ -687,9 +750,9 @@ function handleMessage(msg) {
     }
     case 'ohlc_update': {
       state.price = data?.close ?? data?.price ?? state.price;
-      if (data?.open) state.open  = data.open;
-      if (data?.high) state.high  = data.high;
-      if (data?.low)  state.low   = data.low;
+      if (data?.open) state.open = data.open;
+      if (data?.high) state.high = data.high;
+      if (data?.low)  state.low  = data.low;
       if (currentRoom !== null) updateSidebarPrice(currentRoom, state.price);
       state.lastUpdated = new Date(); updateDetail();
       break;
@@ -705,20 +768,20 @@ function handleMessage(msg) {
       break;
     }
     default: {
-  // warm-start message: type = room ID, data = last price payload
-  if (type === String(currentRoom) && data?.price) {
-    state.price = data.price;
-    updateSidebarPrice(currentRoom, data.price);
-    flashPrice();
-    updateDetail();
-  }
-  break;
-}
+      // warm-start: type = room ID string
+      if (type === String(currentRoom) && data?.price) {
+        state.price = data.price;
+        updateSidebarPrice(currentRoom, data.price);
+        flashPrice();
+        updateDetail();
+      }
+      break;
+    }
   }
 }
 
 function lastPoint(arr, resolution) {
-  if (!arr || !arr.length) return null;
+  if (!arr?.length) return null;
   const filtered = resolution ? arr.filter(p => p.resolution === resolution) : arr;
   return filtered.length ? filtered[filtered.length - 1] : null;
 }
@@ -748,8 +811,8 @@ function valEl(raw, decimals = 4, colorFn = null) {
   if (colorFn) cls = colorFn(n);
   return `<span class="ind-row-val ${cls}">${display}</span>`;
 }
-function rsiColor(v) { return v >= 70 ? 'positive' : v <= 30 ? 'negative' : 'neutral'; }
-function histColor(v) { return v >= 0 ? 'positive' : 'negative'; }
+function rsiColor(v)  { return v >= 70 ? 'positive' : v <= 30 ? 'negative' : 'neutral'; }
+function histColor(v) { return v >= 0  ? 'positive' : 'negative'; }
 
 // ──────────────────────────────────────────────────────────
 //  DETAIL PANEL
@@ -761,12 +824,16 @@ function updateDetail() {
   const instr = INSTRUMENTS.find(i => i.id === currentRoom);
   if (!instr) return;
 
-  const rsiVal = state.rsi !== null ? parseFloat(state.rsi) : null;
-  const rsiPct = rsiVal !== null ? Math.min(100, Math.max(0, rsiVal)) : 0;
-  const rsiBarColor = rsiVal !== null ? (rsiVal >= 70 ? '#f87171' : rsiVal <= 30 ? '#4ade80' : '#fbbf24') : '#3d4f6a';
+  const isSubbed = currentUser?.subscriptions.has(instr.id) ?? false;
+  const rsiVal   = state.rsi !== null ? parseFloat(state.rsi) : null;
+  const rsiPct   = rsiVal !== null ? Math.min(100, Math.max(0, rsiVal)) : 0;
+  const rsiBarColor = rsiVal !== null
+    ? (rsiVal >= 70 ? '#f87171' : rsiVal <= 30 ? '#4ade80' : '#fbbf24')
+    : '#3d4f6a';
   const histVal = state.histogram !== null ? parseFloat(state.histogram) : null;
 
-  const isSubbed = currentUser?.subscriptions.has(instr.id);
+  // Price shown from sidebarPrices when state.price is null (we're joined all rooms)
+  const displayPrice = state.price ?? sidebarPrices[currentRoom] ?? null;
 
   detail.innerHTML = `
     <div class="detail-header">
@@ -784,19 +851,35 @@ function updateDetail() {
       <div>
         <div class="price-label">Current Price</div>
         <div class="price-value" id="price-display">
-          ${state.price !== null ? fmtPrice(state.price) : waiting()}
+          ${displayPrice !== null ? fmtPrice(displayPrice) : waiting()}
         </div>
       </div>
       <div class="ohlc-mini">
-        <div class="ohlc-item"><span class="ohlc-k">Open</span><span class="ohlc-v">${state.open !== null ? fmtPrice(state.open) : '—'}</span></div>
-        <div class="ohlc-item"><span class="ohlc-k">High</span><span class="ohlc-v">${state.high !== null ? fmtPrice(state.high) : '—'}</span></div>
-        <div class="ohlc-item"><span class="ohlc-k">Low</span><span class="ohlc-v">${state.low !== null ? fmtPrice(state.low) : '—'}</span></div>
-        <div class="ohlc-item"><span class="ohlc-k">Close</span><span class="ohlc-v">${state.price !== null ? fmtPrice(state.price) : '—'}</span></div>
+        <div class="ohlc-item"><span class="ohlc-k">Open</span><span class="ohlc-v">${state.open  !== null ? fmtPrice(state.open)  : '—'}</span></div>
+        <div class="ohlc-item"><span class="ohlc-k">High</span><span class="ohlc-v">${state.high  !== null ? fmtPrice(state.high)  : '—'}</span></div>
+        <div class="ohlc-item"><span class="ohlc-k">Low</span> <span class="ohlc-v">${state.low   !== null ? fmtPrice(state.low)   : '—'}</span></div>
+        <div class="ohlc-item"><span class="ohlc-k">Close</span><span class="ohlc-v">${displayPrice !== null ? fmtPrice(displayPrice) : '—'}</span></div>
       </div>
     </div>
 
-    <div class="section-label">Indicators · 1S / BB 1M</div>
+    ${isSubbed ? renderIndicators(rsiVal, rsiPct, rsiBarColor, histVal) : renderSubscribeGate(instr)}
+    <hr class="hdivider">
+  `;
 
+  // Wire the subscribe-gate button if rendered
+  const gateBtn = detail.querySelector('.subscribe-gate-btn');
+  if (gateBtn) {
+    gateBtn.addEventListener('click', async () => {
+      gateBtn.classList.add('loading');
+      gateBtn.textContent = 'Subscribing...';
+      await toggleSubscription(instr.id, null);
+    });
+  }
+}
+
+function renderIndicators(rsiVal, rsiPct, rsiBarColor, histVal) {
+  return `
+    <div class="section-label">Indicators · 1S / BB 1M</div>
     <div class="cards-grid">
       <div class="ind-card" id="card-sma">
         <div class="ind-card-header"><span class="ind-name">Moving Averages</span><span class="ind-res">1S</span></div>
@@ -825,7 +908,9 @@ function updateDetail() {
           <div class="ind-row"><span class="ind-row-label">Signal Line</span>${valEl(state.signal, 4)}</div>
           <div class="ind-row">
             <span class="ind-row-label">Histogram</span>
-            ${histVal !== null ? `<span class="ind-row-val ${histColor(histVal)}">${histVal >= 0 ? '+' : ''}${fmt(histVal, 4)}</span>` : waiting()}
+            ${histVal !== null
+              ? `<span class="ind-row-val ${histColor(histVal)}">${histVal >= 0 ? '+' : ''}${fmt(histVal, 4)}</span>`
+              : waiting()}
           </div>
         </div>
       </div>
@@ -838,7 +923,20 @@ function updateDetail() {
         </div>
       </div>
     </div>
-    <hr class="hdivider">
+  `;
+}
+
+function renderSubscribeGate(instr) {
+  return `
+    <div class="subscribe-gate">
+      <div class="subscribe-gate-icon">★</div>
+      <div class="subscribe-gate-title">Subscribe to view indicators</div>
+      <div class="subscribe-gate-sub">
+        Subscribe to <strong>${instr.sym}/USDT</strong> to unlock live indicator data —
+        SMA, EMA, RSI, MACD, and Bollinger Bands.
+      </div>
+      <button class="subscribe-gate-btn">Subscribe to ${instr.sym}</button>
+    </div>
   `;
 }
 
@@ -864,15 +962,15 @@ function flashPrice() {
 // ──────────────────────────────────────────────────────────
 function renderSidebar(filter = '') {
   const list = document.getElementById('instrument-list');
-  const f = filter.trim().toUpperCase();
-  let items = INSTRUMENTS.filter(i => !f || i.sym.includes(f) || i.full.toUpperCase().includes(f));
+  const f    = filter.trim().toUpperCase();
+  let items  = INSTRUMENTS.filter(i => !f || i.sym.includes(f) || i.full.toUpperCase().includes(f));
   if (showSubscribedOnly && currentUser) {
     items = items.filter(i => currentUser.subscriptions.has(i.id));
   }
 
   list.innerHTML = items.map(instr => {
-    const price = sidebarPrices[instr.id];
-    const active = currentRoom === instr.id;
+    const price    = sidebarPrices[instr.id];
+    const active   = currentRoom === instr.id;
     const isSubbed = currentUser?.subscriptions.has(instr.id) ?? false;
     const priceStr = price !== undefined ? `$${fmt(price, 2)}` : '—';
     return `
@@ -882,7 +980,7 @@ function renderSidebar(filter = '') {
           <div class="instr-base">${instr.full}</div>
         </div>
         <div class="instr-right">
-          <div class="instr-price${price === undefined ? ' dim' : ''}">${priceStr}</div>
+          <div class="instr-price${price === undefined ? ' dim' : ''}" id="sp-${instr.id}">${priceStr}</div>
           <button class="sub-btn${isSubbed ? ' on' : ''}" data-id="${instr.id}" title="${isSubbed ? 'Unsubscribe' : 'Subscribe'}">★</button>
         </div>
       </div>
@@ -899,11 +997,33 @@ function renderSidebar(filter = '') {
 
 function updateSidebarPrice(instrId, price) {
   if (price === null || price === undefined) return;
-  sidebarPrices[instrId] = parseFloat(price);
-  const el = document.querySelector(`.instr-item[data-id="${instrId}"] .instr-price`);
+  const n = parseFloat(price);
+  if (isNaN(n)) return;
+
+  sidebarPrices[instrId] = n;
+
+  // Update price element in-place without full re-render
+  const el = document.getElementById(`sp-${instrId}`);
   if (el) {
-    el.textContent = '$' + fmt(price, 2);
+    el.textContent = '$' + fmt(n, 2);
     el.classList.remove('dim');
+
+    // Flash tick animation
+    el.classList.remove('tick');
+    void el.offsetWidth;
+    el.classList.add('tick');
+    setTimeout(() => el.classList.remove('tick'), 400);
+  }
+
+  // Also update the RHS price-display if this is currentRoom and detail is open
+  if (instrId === currentRoom && state.price === null) {
+    const pd = document.getElementById('price-display');
+    if (pd) {
+      pd.innerHTML = fmtPrice(n);
+      pd.classList.remove('flash');
+      void pd.offsetWidth;
+      pd.classList.add('flash');
+    }
   }
 }
 
@@ -920,7 +1040,9 @@ function resetState() {
 
 function selectInstrument(id) {
   if (currentRoom === id) return;
-  if (currentRoom !== null) leaveRoom(currentRoom);
+
+  // No leave needed — we stay joined to all 25 for sidebar prices.
+  // currentRoom just tracks which instrument the RHS is showing.
   currentRoom = id;
   resetState();
 
@@ -928,7 +1050,13 @@ function selectInstrument(id) {
   document.getElementById('detail').style.display = 'block';
   updateDetail();
   renderSidebar(document.getElementById('search').value);
-  joinRoom(id);
+
+  // Only join if subscribed — this triggers indicator history/updates from backend
+  if (currentUser?.subscriptions.has(id)) {
+    joinRoom(id);
+  }
+  // Non-subscribed: price already flowing from joinAll25, but indicators won't come.
+  // The subscribe gate is shown instead.
 }
 
 // ──────────────────────────────────────────────────────────
@@ -954,21 +1082,18 @@ function setWsStatus(status) {
 //  BOOT
 // ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  // login
   document.getElementById('login-btn').addEventListener('click', doLogin);
   document.getElementById('login-password').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doLogin();
   });
   document.getElementById('logout-btn').addEventListener('click', doLogout);
 
-  // filter toggle
   document.getElementById('filter-toggle').addEventListener('click', () => {
     showSubscribedOnly = !showSubscribedOnly;
     document.getElementById('filter-toggle').classList.toggle('active', showSubscribedOnly);
     renderSidebar(document.getElementById('search').value);
   });
 
-  // search
   document.getElementById('search').addEventListener('input', (e) => {
     renderSidebar(e.target.value);
   });
