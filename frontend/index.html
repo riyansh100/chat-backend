@@ -312,7 +312,6 @@
 </head>
 <body>
 
-<!-- ─── LOGIN OVERLAY ────────────────────────────────────── -->
 <div id="login-overlay">
   <div class="login-box">
     <div>
@@ -338,7 +337,6 @@
   </div>
 </div>
 
-<!-- ─── MAIN APP ──────────────────────────────────────────── -->
 <div id="app">
   <div id="topbar">
     <div class="brand">
@@ -395,8 +393,8 @@ const WS_URL   = "ws://192.168.1.71/ws";
 //  INSTRUMENTS
 // ──────────────────────────────────────────────────────────
 const INSTRUMENTS = [
-  { id: 101, sym: "BTC",   full: "Bitcoin"           },
-  { id: 102, sym: "ETH",   full: "Ethereum"          },
+  { id: 101, sym: "BTC",   full: "Bitcoin"          },
+  { id: 102, sym: "ETH",   full: "Ethereum"         },
   { id: 103, sym: "BNB",   full: "BNB"               },
   { id: 104, sym: "SOL",   full: "Solana"            },
   { id: 105, sym: "XRP",   full: "XRP"               },
@@ -602,9 +600,16 @@ function leaveRoom(roomId) { send({ type: 'leave', room: String(roomId) }); }
 //  MESSAGE HANDLER
 // ──────────────────────────────────────────────────────────
 // extractPrice: parse a price value from common message shapes
-function extractPrice(data) {
+function extractPrice(type, data) {
   if (!data) return null;
-  const v = data.close ?? data.price ?? data.value ?? data.sma ?? data.ema ?? null;
+  
+  // FIX: Prevent indicator values (like RSI = 39) from hijacking the global price
+  if (type.includes('sma') || type.includes('ema') || type.includes('rsi') || 
+      type.includes('macd') || type.includes('bb')) {
+    return null;
+  }
+  
+  const v = data.close ?? data.price ?? data.value ?? null;
   if (v === null || v === undefined) return null;
   const n = parseFloat(v);
   return isNaN(n) ? null : n;
@@ -627,10 +632,15 @@ function handleMessage(msg) {
 
   // ── 1. ALWAYS update sidebar price for any instrument, any message ──
   const msgRoom  = getRoomFromMsg(type, data);
-  const msgPrice = extractPrice(data);
+  const msgPrice = extractPrice(type, data); // FIX: Pass 'type' here
 
   if (msgRoom !== null && msgPrice !== null) {
     updateSidebarPrice(msgRoom, msgPrice);
+    
+    // FIX: Keep the internal state synced with background ticks
+    if (msgRoom === currentRoom) {
+      state.price = msgPrice;
+    }
   }
 
   // ── 2. Indicator state updates — only when it concerns currentRoom ──
@@ -670,9 +680,9 @@ function handleMessage(msg) {
       if (pts?.length) {
         const p = lastPoint(pts, '1s') || lastPoint(pts);
         if (p) {
-          state.macd      = p.macd_line   ?? p.macd   ?? null;
+          state.macd      = p.macd_line  ?? p.macd  ?? null;
           state.signal    = p.signal_line ?? p.signal ?? null;
-          state.histogram = p.histogram   ?? null;
+          state.histogram = p.histogram  ?? null;
           updateDetail();
         }
       }
@@ -732,9 +742,9 @@ function handleMessage(msg) {
     }
     case 'macd_update': {
       if (data?.resolution !== '1s') break;
-      state.macd      = data.macd_line   ?? data.macd   ?? state.macd;
+      state.macd      = data.macd_line  ?? data.macd  ?? state.macd;
       state.signal    = data.signal_line ?? data.signal ?? state.signal;
-      state.histogram = data.histogram   ?? state.histogram;
+      state.histogram = data.histogram  ?? state.histogram;
       state.lastUpdated = new Date();
       flashCard('card-macd'); updateDetail();
       break;
@@ -1016,7 +1026,7 @@ function updateSidebarPrice(instrId, price) {
   }
 
   // Also update the RHS price-display if this is currentRoom and detail is open
-  if (instrId === currentRoom && state.price === null) {
+  if (instrId === currentRoom) { // FIX: Removed '&& state.price === null' lock
     const pd = document.getElementById('price-display');
     if (pd) {
       pd.innerHTML = fmtPrice(n);
