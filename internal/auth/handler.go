@@ -4,21 +4,22 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 
 	"github.com/riyansh/chat-backend/internal/history"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
 type Handler struct {
-	store  *Store
-	warmer *Warmer
+	store        *Store
+	warmer       *Warmer
+	sessionStore *SessionStore
 }
 
 func NewHandler(store *Store, histStore *history.Store, lb *chatredis.RedisLoadBalancer) *Handler {
 	return &Handler{
-		store:  store,
-		warmer: NewWarmer(histStore, lb),
+		store:        store,
+		warmer:       NewWarmer(histStore, lb),
+		sessionStore: NewSessionStore(lb),
 	}
 }
 
@@ -35,11 +36,11 @@ func errJSON(w http.ResponseWriter, status int, msg string) {
 
 // POST /login
 // Body: {"username":"alice","password":"alice123"}
-// Returns: {"id":1,"username":"alice","subscriptions":[101,102]}
+// Returns: {"token":"<uuid>","id":1,"username":"alice","subscriptions":[101,102]}
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -68,24 +69,33 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		subs = []int{}
 	}
 
+	// create session token
+	token, err := h.sessionStore.CreateSession(r.Context(), client.ID)
+	if err != nil {
+		errJSON(w, http.StatusInternalServerError, "session creation failed")
+		return
+	}
+
 	// warm cache async — non-blocking
 	if len(subs) > 0 {
 		h.warmer.WarmAsync(client.ID, subs)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
+		"token":         token,
 		"id":            client.ID,
 		"username":      client.Username,
 		"subscriptions": subs,
 	})
 }
 
-// POST /subscribe
-// Body: {"client_id":1,"instrument_id":101}
-func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
+// POST /logout
+// Requires: Authorization: Bearer <token>
+// Deletes the session from Redis.
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -94,58 +104,74 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// token already validated by AuthMiddleware — just delete it
+	token := TokenFromContext(r.Context())
+	if err := h.sessionStore.DeleteSession(r.Context(), token); err != nil {
+		errJSON(w, http.StatusInternalServerError, "logout failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+// POST /subscribe
+// Requires: Authorization: Bearer <token>
+// Body: {"instrument_id":101}
+// client_id is derived from the session — NOT from the request body.
+func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errJSON(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+
+	clientID := ClientIDFromContext(r.Context())
+
 	var body struct {
-		ClientID     int `json:"client_id"`
 		InstrumentID int `json:"instrument_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if body.ClientID == 0 || body.InstrumentID == 0 {
-		errJSON(w, http.StatusBadRequest, "client_id and instrument_id required")
+	if body.InstrumentID == 0 {
+		errJSON(w, http.StatusBadRequest, "instrument_id required")
 		return
 	}
 
-	if err := h.store.Subscribe(r.Context(), body.ClientID, body.InstrumentID); err != nil {
+	if err := h.store.Subscribe(r.Context(), clientID, body.InstrumentID); err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// warm cache for this single instrument
-	h.warmer.WarmAsync(body.ClientID, []int{body.InstrumentID})
+	h.warmer.WarmAsync(clientID, []int{body.InstrumentID})
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "subscribed"})
 }
 
 // POST /unsubscribe
-// Body: {"client_id":1,"instrument_id":101}
+// Requires: Authorization: Bearer <token>
+// Body: {"instrument_id":101}
 func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodOptions {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	if r.Method != http.MethodPost {
 		errJSON(w, http.StatusMethodNotAllowed, "POST only")
 		return
 	}
 
+	clientID := ClientIDFromContext(r.Context())
+
 	var body struct {
-		ClientID     int `json:"client_id"`
 		InstrumentID int `json:"instrument_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		errJSON(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if body.ClientID == 0 || body.InstrumentID == 0 {
-		errJSON(w, http.StatusBadRequest, "client_id and instrument_id required")
+	if body.InstrumentID == 0 {
+		errJSON(w, http.StatusBadRequest, "instrument_id required")
 		return
 	}
 
-	if err := h.store.Unsubscribe(r.Context(), body.ClientID, body.InstrumentID); err != nil {
+	if err := h.store.Unsubscribe(r.Context(), clientID, body.InstrumentID); err != nil {
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -153,7 +179,9 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unsubscribed"})
 }
 
-// GET /subscriptions?client_id=1
+// GET /subscriptions
+// Requires: Authorization: Bearer <token>
+// client_id derived from session — no query param needed anymore.
 func (h *Handler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method != http.MethodGet {
@@ -161,12 +189,7 @@ func (h *Handler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIDStr := r.URL.Query().Get("client_id")
-	clientID, err := strconv.Atoi(clientIDStr)
-	if err != nil || clientID == 0 {
-		errJSON(w, http.StatusBadRequest, "valid client_id required")
-		return
-	}
+	clientID := ClientIDFromContext(r.Context())
 
 	subs, err := h.store.GetSubscriptions(r.Context(), clientID)
 	if err != nil {
