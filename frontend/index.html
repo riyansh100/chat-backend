@@ -33,7 +33,7 @@
 
   html, body { height: 100%; overflow: hidden; background: var(--bg-0); color: var(--text-primary); font-family: var(--sans); }
 
-  /* ─── LOGIN ──────────────────────────────────────────── */
+  /* LOGIN */
   #login-overlay { position: fixed; inset: 0; z-index: 100; background: var(--bg-0); display: flex; align-items: center; justify-content: center; }
   #login-overlay.hidden { display: none; }
   .login-box { background: var(--bg-1); border: 1px solid var(--border-bright); border-radius: 10px; padding: 40px 36px; width: 360px; display: flex; flex-direction: column; gap: 20px; }
@@ -49,7 +49,7 @@
   .login-error { font-family: var(--mono); font-size: 12px; color: var(--red); background: var(--red-dim); border: 1px solid var(--red); border-radius: 4px; padding: 8px 12px; display: none; }
   .login-error.visible { display: block; }
 
-  /* ─── LAYOUT ─────────────────────────────────────────── */
+  /* LAYOUT */
   #app { display: flex; flex-direction: column; height: 100vh; }
   #topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; height: 48px; background: var(--bg-1); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10; }
   .brand { display: flex; align-items: center; gap: 10px; }
@@ -68,7 +68,7 @@
   .ws-label.connected { color: var(--accent); } .ws-label.error { color: var(--red); }
   #main { display: flex; flex: 1; overflow: hidden; }
 
-  /* ─── LEFT PANEL ─────────────────────────────────────── */
+  /* LEFT PANEL */
   #left-panel { width: 240px; flex-shrink: 0; background: var(--bg-1); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
   .panel-header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.12em; text-transform: uppercase; display: flex; align-items: center; justify-content: space-between; }
   .filter-toggle { font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em; padding: 2px 7px; border-radius: 3px; cursor: pointer; border: 1px solid var(--border-bright); background: transparent; color: var(--text-dim); transition: all 0.2s; }
@@ -95,23 +95,19 @@
   .sub-btn { background: none; border: none; cursor: pointer; font-size: 12px; line-height: 1; padding: 1px 2px; color: var(--text-dim); transition: color 0.2s; }
   .sub-btn:hover { color: var(--yellow); } .sub-btn.on { color: var(--yellow); }
 
-  /* ─── RIGHT PANEL ────────────────────────────────────── */
+  /* RIGHT PANEL */
   #right-panel { flex: 1; overflow: hidden; background: var(--bg-0); display: flex; flex-direction: column; }
   #empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--text-dim); font-family: var(--mono); font-size: 13px; }
   #empty-state svg { opacity: 0.2; }
 
-  /* ─── DETAIL (full-height flex column) ───────────────── */
+  /* DETAIL */
   #detail { display: none; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-
-  /* Header strip */
   .detail-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 12px 22px 8px; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
   .detail-title { font-family: var(--mono); font-size: 20px; font-weight: 600; }
   .detail-subtitle { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
   .detail-header-right { text-align: right; }
   .last-updated { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
   .update-cadence { margin-top: 3px; font-family: var(--mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.08em; }
-
-  /* Price hero */
   .price-hero { background: var(--bg-1); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 10px 22px; display: flex; align-items: center; gap: 28px; flex-shrink: 0; flex-wrap: wrap; }
   .price-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.1em; }
   .price-value { font-family: var(--mono); font-size: 26px; font-weight: 600; color: var(--accent); margin-top: 2px; }
@@ -121,16 +117,12 @@
   .ohlc-item { display: flex; flex-direction: column; gap: 1px; }
   .ohlc-k { font-family: var(--mono); font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; }
   .ohlc-v { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); }
-
-  /* Subscribe gate */
   .subscribe-gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 40px; }
   .subscribe-gate-icon { font-size: 32px; opacity: 0.5; }
   .subscribe-gate-title { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text-secondary); }
   .subscribe-gate-sub { font-size: 12px; color: var(--text-dim); line-height: 1.6; max-width: 320px; }
   .subscribe-gate-btn { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); border-radius: 5px; padding: 9px 22px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
   .subscribe-gate-btn:hover { background: var(--accent); color: #080e1a; }
-
-  /* Charts area — fills remaining height */
   #charts-area { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .chart-panels { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
   .chart-block { display: flex; flex-direction: column; border-bottom: 1px solid var(--border); position: relative; overflow: hidden; }
@@ -142,13 +134,9 @@
   .legend-item { font-family: var(--mono); font-size: 10px; }
   .legend-item span { font-weight: 600; }
   .chart-container { flex: 1; min-height: 0; }
-
-  /* Combo tab toggle */
   .combo-tabs { position: absolute; top: 4px; right: 10px; z-index: 3; display: flex; gap: 4px; }
   .combo-tab { font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 3px; cursor: pointer; border: 1px solid var(--border-bright); background: transparent; color: var(--text-dim); transition: all 0.15s; }
   .combo-tab.active { background: var(--bg-3); border-color: var(--accent); color: var(--accent); }
-
-  /* Indicator cards */
   .cards-section { flex-shrink: 0; padding: 12px 22px 14px; border-top: 1px solid var(--border); }
   .section-label { font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.15em; text-transform: uppercase; margin-bottom: 8px; }
   .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
@@ -238,7 +226,6 @@
       </div>
 
       <div id="detail">
-        <!-- Static skeleton that never gets innerHTML-wiped -->
         <div class="detail-header">
           <div>
             <div class="detail-title" id="d-title">—</div>
@@ -263,10 +250,8 @@
           </div>
         </div>
 
-        <!-- Charts + cards (subscribed view) -->
         <div id="charts-area" style="display:none; flex:1; min-height:0; flex-direction:column; overflow:hidden;">
           <div class="chart-panels">
-
             <div class="chart-block price-block">
               <div class="chart-label">
                 CANDLES · 1S &nbsp;
@@ -274,7 +259,6 @@
               </div>
               <div class="chart-container" id="chart-price"></div>
             </div>
-
             <div class="chart-block combo-block">
               <div class="chart-label">
                 <span id="combo-label-text">RSI (14) · 1S</span>&nbsp;
@@ -286,7 +270,6 @@
               </div>
               <div class="chart-container" id="chart-combo"></div>
             </div>
-
           </div>
 
           <div class="cards-section">
@@ -312,7 +295,6 @@
           </div>
         </div>
 
-        <!-- Subscribe gate -->
         <div id="subscribe-gate" class="subscribe-gate" style="display:none">
           <div class="subscribe-gate-icon">★</div>
           <div class="subscribe-gate-title">Subscribe to view charts &amp; indicators</div>
@@ -329,7 +311,7 @@
 //  CONFIG
 // ══════════════════════════════════════════════════════════
 const API_BASE = "http://192.168.1.71";
-const WS_URL   = "ws://192.168.1.71/ws";
+const WS_BASE  = "ws://192.168.1.71/ws";
 
 // ══════════════════════════════════════════════════════════
 //  INSTRUMENTS
@@ -351,18 +333,25 @@ const INSTRUMENTS = [
 ];
 
 // ══════════════════════════════════════════════════════════
-//  SESSION
+//  SESSION STATE
+//  currentUser = { id, username, token, subscriptions: Set }
 // ══════════════════════════════════════════════════════════
 let currentUser = null;
 let showSubscribedOnly = false;
 let ws = null, currentRoom = null, reconnectTimer = null;
 const sidebarPrices = {};
 
+// Auth header helper — all protected fetch calls use this
+function authHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${currentUser?.token ?? ''}`,
+  };
+}
+
 // ══════════════════════════════════════════════════════════
 //  PER-INSTRUMENT HISTORY CACHE
-//  When you switch away and come back, we replay from here.
 // ══════════════════════════════════════════════════════════
-// cache[instrId] = { candles:[], bbU:[], bbM:[], bbL:[], rsi:[], macdLine:[], sigLine:[], hist:[] }
 const cache = {};
 function ensureCache(id) {
   if (!cache[id]) cache[id] = { candles:[], bbU:[], bbM:[], bbL:[], rsi:[], macdLine:[], sigLine:[], hist:[] };
@@ -370,7 +359,7 @@ function ensureCache(id) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  INDICATOR STATE  (active room only, re-used for card values)
+//  INDICATOR STATE
 // ══════════════════════════════════════════════════════════
 const state = {
   price:null, open:null, high:null, low:null,
@@ -389,21 +378,16 @@ const CH = {
   rsiLine:null, rsiOB:null, rsiOS:null,
   macdLine:null, sigLine:null, histBar:null,
 };
-
-// Combo tab state
 let activeComboTab = 'rsi';
 
 // ══════════════════════════════════════════════════════════
 //  LW THEME
-//  FIX: timestamp — use local time formatter so chart shows
-//  local time, not UTC
 // ══════════════════════════════════════════════════════════
 const THEME = {
   layout:{ background:{color:'#080e1a'}, textColor:'#8a9bbf', fontFamily:"'IBM Plex Mono',monospace", fontSize:10 },
   grid:{ vertLines:{color:'#1e3058'}, horzLines:{color:'#1e3058'} },
   crosshair:{ vertLine:{color:'#2a4575',labelBackgroundColor:'#0d1526'}, horzLine:{color:'#2a4575',labelBackgroundColor:'#0d1526'} },
   rightPriceScale:{ borderColor:'#1e3058', textColor:'#8a9bbf' },
-  // FIX TIMESTAMP: no automatic UTC offset — we store local epoch seconds
   timeScale:{
     borderColor:'#1e3058', textColor:'#8a9bbf',
     timeVisible:true, secondsVisible:true,
@@ -416,30 +400,22 @@ const THEME = {
 };
 
 // ══════════════════════════════════════════════════════════
-//  LOCAL EPOCH SECONDS HELPER
-//  FIX: always use local-wall-clock epoch seconds so chart
-//  timestamps match what the user's clock shows.
+//  TIMESTAMP HELPERS
 // ══════════════════════════════════════════════════════════
 function localNowSec() {
-  // Offset the UTC timestamp by the local timezone offset so that
-  // LightweightCharts (which treats all times as UTC) displays local time.
   const now = Date.now();
-  const offsetMs = new Date().getTimezoneOffset() * 60 * 1000; // negative for IST
+  const offsetMs = new Date().getTimezoneOffset() * 60 * 1000;
   return Math.floor((now - offsetMs) / 1000);
 }
-// Floor to 1-second bucket (for candle/RSI/MACD live points)
 function sec1Bucket() { return localNowSec(); }
-// Floor to 1-minute bucket (for BB overlaid on price chart)
 function min1Bucket() { return Math.floor(localNowSec() / 60) * 60; }
-
-// Convert a server-side UTC unix timestamp to local display seconds
 function toLocalSec(utcSec) {
   const offsetSec = new Date().getTimezoneOffset() * 60;
-  return utcSec - offsetSec; // IST is UTC+5:30 so offsetSec = -330 → subtracting adds +330
+  return utcSec - offsetSec;
 }
 
 // ══════════════════════════════════════════════════════════
-//  CREATE CHARTS
+//  CREATE / DESTROY CHARTS
 // ══════════════════════════════════════════════════════════
 function createCharts() {
   destroyCharts();
@@ -447,7 +423,6 @@ function createCharts() {
   const ce = document.getElementById('chart-combo');
   if (!pe || !ce) return;
 
-  // ── Price chart (1s candles + BB 1m overlay)
   CH.price = LightweightCharts.createChart(pe, {
     ...THEME,
     rightPriceScale:{ ...THEME.rightPriceScale, scaleMargins:{top:0.08, bottom:0.08} },
@@ -457,13 +432,10 @@ function createCharts() {
     borderUpColor:'#4ade80', borderDownColor:'#f87171',
     wickUpColor:'#4ade80', wickDownColor:'#f87171',
   });
-  // BB lines on price chart (1m resolution — they update every minute)
   CH.bbU = CH.price.addLineSeries({color:'rgba(96,165,250,0.55)', lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false});
   CH.bbM = CH.price.addLineSeries({color:'rgba(96,165,250,0.9)',  lineWidth:1,             priceLineVisible:false, lastValueVisible:false});
   CH.bbL = CH.price.addLineSeries({color:'rgba(96,165,250,0.55)', lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false});
 
-  // ── Combo chart — RSI on its OWN right scale (0-100), MACD on separate scale
-  // FIX RSI INVISIBLE: give RSI its own price scale 'rsi' so it doesn't compete with MACD's tiny values
   CH.combo = LightweightCharts.createChart(ce, {
     ...THEME,
     leftPriceScale:{ visible:true, borderColor:'#1e3058', textColor:'#8a9bbf', scaleMargins:{top:0.1,bottom:0.1} },
@@ -471,18 +443,15 @@ function createCharts() {
     timeScale:{ ...THEME.timeScale, visible:true },
   });
 
-  // RSI on LEFT scale (fixed 0-100)
   CH.rsiLine = CH.combo.addLineSeries({ color:'#fbbf24', lineWidth:2, priceLineVisible:false, priceScaleId:'left', visible: activeComboTab==='rsi' });
   CH.rsiOB   = CH.combo.addLineSeries({ color:'rgba(248,113,113,0.4)', lineWidth:1, lineStyle:3, priceLineVisible:false, lastValueVisible:false, priceScaleId:'left', visible: activeComboTab==='rsi' });
   CH.rsiOS   = CH.combo.addLineSeries({ color:'rgba(74,222,128,0.4)',  lineWidth:1, lineStyle:3, priceLineVisible:false, lastValueVisible:false, priceScaleId:'left', visible: activeComboTab==='rsi' });
   CH.combo.priceScale('left').applyOptions({ autoScale:false, minimum:0, maximum:100 });
 
-  // MACD on RIGHT scale (auto)
   CH.macdLine = CH.combo.addLineSeries({ color:'#60a5fa', lineWidth:2, priceLineVisible:false, priceScaleId:'right', visible: activeComboTab==='macd' });
   CH.sigLine  = CH.combo.addLineSeries({ color:'#f87171', lineWidth:2, priceLineVisible:false, priceScaleId:'right', visible: activeComboTab==='macd' });
   CH.histBar  = CH.combo.addHistogramSeries({ priceScaleId:'right', visible: activeComboTab==='macd' });
 
-  // Crosshair sync
   CH.price.subscribeCrosshairMove(p => {
     if (!p.time || !CH.combo) return;
     const ref = activeComboTab==='rsi' ? CH.rsiLine : CH.macdLine;
@@ -493,7 +462,6 @@ function createCharts() {
     CH.price.setCrosshairPosition(NaN, p.time, CH.candle);
   });
 
-  // Resize observers
   new ResizeObserver(entries => { const r=entries[0].contentRect; if(r.width>0&&r.height>0) CH.price.resize(r.width,r.height); }).observe(pe);
   new ResizeObserver(entries => { const r=entries[0].contentRect; if(r.width>0&&r.height>0) CH.combo.resize(r.width,r.height); }).observe(ce);
 }
@@ -504,10 +472,9 @@ function destroyCharts() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  CHART DATA UTILS — operate on cache[id] arrays
+//  CHART DATA UTILS
 // ══════════════════════════════════════════════════════════
 function upsertCandle(c, time, open, high, low, close) {
-  // c = cache[instrId].candles
   const last = c.at(-1);
   if (last && last.time === time) {
     last.high = Math.max(last.high, high);
@@ -518,7 +485,6 @@ function upsertCandle(c, time, open, high, low, close) {
   }
   if (CH.candle) CH.candle.setData(c);
 }
-
 function upsertLine(arr, series, time, value) {
   if (!series || isNaN(value)) return;
   const last = arr.at(-1);
@@ -526,7 +492,6 @@ function upsertLine(arr, series, time, value) {
   else { arr.push({time, value}); }
   series.setData(arr);
 }
-
 function upsertHist(arr, series, time, value, color) {
   if (!series || isNaN(value)) return;
   const last = arr.at(-1);
@@ -534,7 +499,6 @@ function upsertHist(arr, series, time, value, color) {
   else { arr.push({time, value, color}); }
   series.setData(arr);
 }
-
 function setRSIRefLines(rsiArr) {
   if (!CH.rsiOB || rsiArr.length < 2) return;
   const t0 = rsiArr[0].time, t1 = rsiArr.at(-1).time;
@@ -543,13 +507,12 @@ function setRSIRefLines(rsiArr) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  HISTORY LOADERS — populate cache + push to chart
+//  HISTORY LOADERS
 // ══════════════════════════════════════════════════════════
 function loadOHLCHistory(instrId, pts) {
   if (!CH.candle || !pts?.length) return;
   const c = ensureCache(instrId);
   c.candles = [];
-  let prev = null;
   for (const p of pts) {
     let inner = p;
     if (typeof p.candle === 'string') { try{inner=JSON.parse(p.candle);}catch(_){} }
@@ -558,13 +521,11 @@ function loadOHLCHistory(instrId, pts) {
     const open  = +inner.open, high = +inner.high, low = +inner.low, close = +inner.close;
     if (isNaN(open) || isNaN(close)) continue;
     c.candles.push({time, open, high, low, close});
-    prev = close;
   }
   c.candles.sort((a,b)=>a.time-b.time);
   CH.candle.setData(c.candles);
   CH.price?.timeScale().fitContent();
 }
-
 function loadBBHistory(instrId, pts) {
   if (!CH.bbU || !pts?.length) return;
   const c = ensureCache(instrId);
@@ -580,7 +541,6 @@ function loadBBHistory(instrId, pts) {
   }
   CH.bbU.setData(c.bbU); CH.bbM.setData(c.bbM); CH.bbL.setData(c.bbL);
 }
-
 function loadRSIHistory(instrId, pts) {
   if (!CH.rsiLine || !pts?.length) return;
   const c = ensureCache(instrId);
@@ -594,7 +554,6 @@ function loadRSIHistory(instrId, pts) {
   setRSIRefLines(c.rsi);
   if (activeComboTab==='rsi') CH.combo?.timeScale().fitContent();
 }
-
 function loadMACDHistory(instrId, pts) {
   if (!CH.macdLine || !pts?.length) return;
   const c = ensureCache(instrId);
@@ -612,8 +571,6 @@ function loadMACDHistory(instrId, pts) {
   CH.macdLine.setData(c.macdLine); CH.sigLine.setData(c.sigLine); CH.histBar.setData(c.hist);
   if (activeComboTab==='macd') CH.combo?.timeScale().fitContent();
 }
-
-// Replay cached data into freshly created charts (on instrument switch back)
 function replayCache(instrId) {
   const c = cache[instrId];
   if (!c) return;
@@ -631,16 +588,13 @@ function switchComboTab(tab) {
   activeComboTab = tab;
   document.getElementById('tab-rsi').classList.toggle('active', tab==='rsi');
   document.getElementById('tab-macd').classList.toggle('active', tab==='macd');
-
   const isRSI = tab === 'rsi';
   [CH.rsiLine, CH.rsiOB, CH.rsiOS].forEach(s => { if(s) s.applyOptions({visible: isRSI}); });
   [CH.macdLine, CH.sigLine, CH.histBar].forEach(s => { if(s) s.applyOptions({visible: !isRSI}); });
-
   const lt = document.getElementById('combo-label-text');
   if (lt) lt.textContent = isRSI ? 'RSI (14) · 1S' : 'MACD (12,26,9) · 1S';
   updateComboLegend();
 }
-
 function updateComboLegend() {
   if (activeComboTab === 'rsi') updateLegendRSI(state.rsi);
   else updateLegendMACD(state.macd, state.signal, state.histogram);
@@ -658,27 +612,51 @@ async function doLogin() {
   btn.disabled = true; btn.textContent = 'Signing in...';
   errEl.classList.remove('visible');
   try {
-    const res  = await fetch(`${API_BASE}/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
+    const res  = await fetch(`${API_BASE}/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({username, password}),
+    });
     const data = await res.json();
     if (!res.ok) { showLoginError(data.error || 'Login failed.'); return; }
-    currentUser = { id:data.id, username:data.username, subscriptions:new Set(data.subscriptions||[]) };
+
+    // Store token — all subsequent calls use Authorization: Bearer <token>
+    currentUser = {
+      id:            data.id,
+      username:      data.username,
+      token:         data.token,
+      subscriptions: new Set(data.subscriptions || []),
+    };
+
     document.getElementById('login-overlay').classList.add('hidden');
     document.getElementById('user-badge').style.display = 'flex';
     document.getElementById('user-badge-name').textContent = currentUser.username;
-    renderSidebar(); connect();
+    renderSidebar();
+    connect();
   } catch(e) { showLoginError('Network error.'); }
   finally { btn.disabled=false; btn.textContent='Sign In'; }
 }
 
-function showLoginError(msg) { const el=document.getElementById('login-error'); el.textContent=msg; el.classList.add('visible'); }
+function showLoginError(msg) {
+  const el = document.getElementById('login-error');
+  el.textContent = msg; el.classList.add('visible');
+}
 
-function doLogout() {
+async function doLogout() {
+  // Fire-and-forget: invalidate session on server
+  if (currentUser?.token) {
+    try {
+      await fetch(`${API_BASE}/logout`, { method: 'POST', headers: authHeaders() });
+    } catch(_) {}
+  }
+
   if (ws) { ws.onclose=null; ws.close(); ws=null; }
   clearTimeout(reconnectTimer);
   currentUser=null; currentRoom=null; showSubscribedOnly=false;
   Object.keys(sidebarPrices).forEach(k=>delete sidebarPrices[k]);
   Object.keys(cache).forEach(k=>delete cache[k]);
   resetState(); destroyCharts();
+
   document.getElementById('login-overlay').classList.remove('hidden');
   document.getElementById('user-badge').style.display='none';
   document.getElementById('detail').style.display='none';
@@ -690,38 +668,49 @@ function doLogout() {
 
 // ══════════════════════════════════════════════════════════
 //  SUBSCRIPTIONS
+//  No client_id in body — server resolves identity from token
 // ══════════════════════════════════════════════════════════
 async function toggleSubscription(instrId, e) {
   if (e) e.stopPropagation();
   if (!currentUser) return;
   const isSubbed = currentUser.subscriptions.has(instrId);
   try {
-    const res = await fetch(`${API_BASE}${isSubbed?'/unsubscribe':'/subscribe'}`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({client_id:currentUser.id, instrument_id:instrId}),
+    const res = await fetch(`${API_BASE}${isSubbed ? '/unsubscribe' : '/subscribe'}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ instrument_id: instrId }),
     });
     if (!res.ok) return;
-    if (isSubbed) currentUser.subscriptions.delete(instrId); else currentUser.subscriptions.add(instrId);
+    if (isSubbed) currentUser.subscriptions.delete(instrId);
+    else          currentUser.subscriptions.add(instrId);
     renderSidebar(document.getElementById('search').value);
     if (instrId === currentRoom) showDetailPanel();
   } catch(_) {}
 }
 
 // ══════════════════════════════════════════════════════════
-//  WEBSOCKET
+//  WEBSOCKET — token passed as ?token= query param
 // ══════════════════════════════════════════════════════════
 function connect() {
+  if (!currentUser?.token) return;
   setWsStatus('connecting');
-  ws = new WebSocket(WS_URL);
+  const url = `${WS_BASE}?token=${encodeURIComponent(currentUser.token)}`;
+  ws = new WebSocket(url);
   ws.onopen = () => {
     setWsStatus('connected'); clearTimeout(reconnectTimer);
     joinAll25();
     if (currentRoom !== null) joinRoom(currentRoom);
   };
   ws.onmessage = e => { let m; try{m=JSON.parse(e.data);}catch{return;} handleMessage(m); };
-  ws.onclose   = () => { setWsStatus('disconnected'); reconnectTimer=setTimeout(connect,3000); };
-  ws.onerror   = () => setWsStatus('error');
+  ws.onclose = (ev) => {
+    setWsStatus('disconnected');
+    // 4001 = server rejected token — don't loop, force logout
+    if (ev.code === 4001) { doLogout(); return; }
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+  ws.onerror = () => setWsStatus('error');
 }
+
 function joinAll25() { INSTRUMENTS.forEach(i => send({type:'join', room:String(i.id)})); }
 function send(o)     { if(ws && ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(o)); }
 function joinRoom(id){ send({type:'join', room:String(id)}); }
@@ -739,24 +728,16 @@ function getRoomFromMsg(type, data) {
 function handleMessage(msg) {
   const {type, data} = msg; if (!type) return;
 
-  // ── 1. Always update sidebar price (all 25 rooms)
-  const msgRoom = getRoomFromMsg(type, data);
-  // Extract price from common fields
-  const rawP = data?.close ?? data?.price ?? null;
+  const msgRoom  = getRoomFromMsg(type, data);
+  const rawP     = data?.close ?? data?.price ?? null;
   const msgPrice = rawP !== null ? parseFloat(rawP) : null;
-  if (msgRoom !== null && msgPrice !== null && !isNaN(msgPrice)) {
-    updateSidebarPrice(msgRoom, msgPrice);
-  }
+  if (msgRoom !== null && msgPrice !== null && !isNaN(msgPrice)) updateSidebarPrice(msgRoom, msgPrice);
 
-  // ── 2. sma_update carries current price — use it for sidebar even for non-currentRoom
   if (type === 'sma_update' && data?.resolution === '1s') {
     const smaPrice = parseFloat(data.value ?? data.sma);
-    if (!isNaN(smaPrice) && msgRoom !== null) {
-      updateSidebarPrice(msgRoom, smaPrice);
-    }
+    if (!isNaN(smaPrice) && msgRoom !== null) updateSidebarPrice(msgRoom, smaPrice);
   }
 
-  // ── 3. Stop processing non-active-room messages beyond sidebar
   if (msgRoom !== null && msgRoom !== currentRoom) return;
 
   const nowSec = sec1Bucket();
@@ -764,7 +745,6 @@ function handleMessage(msg) {
 
   switch (type) {
 
-    // ── HISTORY ──────────────────────────────────────────
     case 'ohlc_history': {
       const pts = data?.candles ?? data?.points;
       if (pts?.length) {
@@ -835,9 +815,7 @@ function handleMessage(msg) {
       break;
     }
 
-    // ── LIVE UPDATES ──────────────────────────────────────
     case 'ohlc_update': {
-      // FIX: use 1s candle bucket for live candles
       const close = parseFloat(data?.close ?? data?.price);
       if (!isNaN(close)) { state.price = close; updateSidebarPrice(currentRoom, close); }
       if (data?.open != null) state.open = data.open;
@@ -847,7 +825,7 @@ function handleMessage(msg) {
       const ch = parseFloat(data?.high ?? state.high ?? close);
       const cl = parseFloat(data?.low  ?? state.low  ?? close);
       const c  = ensureCache(currentRoom);
-      upsertCandle(c.candles, nowSec, co, ch, cl, close);  // 1s bucket
+      upsertCandle(c.candles, nowSec, co, ch, cl, close);
       state.lastUpdated = new Date();
       patchPriceHero(); patchOHLC(); updateLastUpdated(); updateLegendPrice();
       break;
@@ -858,7 +836,6 @@ function handleMessage(msg) {
       const p = parseFloat(data?.price ?? data?.close ?? data?.value);
       if (!isNaN(p)) {
         state.price = p; updateSidebarPrice(currentRoom, p);
-        // Extend current 1s candle close
         const c = ensureCache(currentRoom);
         const last = c.candles.at(-1);
         if (last) upsertCandle(c.candles, nowSec, last.open, Math.max(last.high,p), Math.min(last.low,p), p);
@@ -869,16 +846,11 @@ function handleMessage(msg) {
 
     case 'sma_update': {
       if (data?.resolution !== '1s') break;
-      // FIX: sma carries the current price — use it to drive price display
       const smaVal = parseFloat(data.value ?? data.sma);
       state.sma = smaVal;
-      // If we haven't gotten an explicit price yet, derive from SMA
-      if (state.price === null && !isNaN(smaVal)) {
-        state.price = smaVal; patchPriceHero();
-      }
+      if (state.price === null && !isNaN(smaVal)) { state.price = smaVal; patchPriceHero(); }
       state.lastUpdated = new Date();
       flashCard('card-sma'); patchCard('rows-sma', buildSMARows()); updateLastUpdated();
-      // Also upsert 1s candle using SMA as price proxy (fills candle chart faster)
       const c = ensureCache(currentRoom);
       if (!isNaN(smaVal)) {
         const last = c.candles.at(-1);
@@ -952,7 +924,7 @@ function lastPt(arr, res) {
 }
 
 // ══════════════════════════════════════════════════════════
-//  DOM PATCH HELPERS  (never full innerHTML, just targets)
+//  DOM PATCH HELPERS
 // ══════════════════════════════════════════════════════════
 function fmt(v, d=2) {
   if (v == null) return null;
@@ -970,7 +942,6 @@ function valEl(raw, d=4, cfn=null) {
 function rsiColor(v)  { return v>=70?'positive':v<=30?'negative':'neutral'; }
 function histColor(v) { return v>=0?'positive':'negative'; }
 
-// FIX: patchPriceHero writes to individual DOM nodes — no innerHTML wipe
 function patchPriceHero() {
   const dp = state.price ?? sidebarPrices[currentRoom] ?? null;
   if (dp == null) return;
@@ -1049,34 +1020,24 @@ function buildBBRows() {
 }
 
 // ══════════════════════════════════════════════════════════
-//  DETAIL PANEL  (static skeleton — never innerHTML-replaced)
+//  DETAIL PANEL
 // ══════════════════════════════════════════════════════════
 function showDetailPanel() {
   const instr = INSTRUMENTS.find(i => i.id === currentRoom); if (!instr) return;
-
-  // Show detail, hide empty state
   document.getElementById('detail').style.display = 'flex';
   document.getElementById('empty-state').style.display = 'none';
-
-  // Update header text
   document.getElementById('d-title').textContent    = `${instr.sym}/USDT`;
   document.getElementById('d-subtitle').textContent  = instr.full;
   document.getElementById('d-cadence').textContent   = `LIVE · ${currentUser?.username ?? ''}`;
 
-  const isSubbed = currentUser?.subscriptions.has(instr.id) ?? false;
+  const isSubbed   = currentUser?.subscriptions.has(instr.id) ?? false;
   const chartsArea = document.getElementById('charts-area');
   const gate       = document.getElementById('subscribe-gate');
 
   if (isSubbed) {
     gate.style.display = 'none';
     chartsArea.style.display = 'flex';
-    // Create charts if not yet created
-    if (!CH.price) {
-      createCharts();
-      // Replay any cached data (e.g. switching back to a previously viewed instrument)
-      replayCache(currentRoom);
-    }
-    // Re-populate cards
+    if (!CH.price) { createCharts(); replayCache(currentRoom); }
     patchCard('rows-sma',  buildSMARows());
     patchCard('rows-rsi',  buildRSIRows());
     patchCard('rows-macd', buildMACDRows());
@@ -1091,7 +1052,6 @@ function showDetailPanel() {
       await toggleSubscription(instr.id, null);
     };
   }
-
   patchPriceHero(); patchOHLC();
 }
 
@@ -1120,25 +1080,17 @@ function renderSidebar(filter = '') {
   list.querySelectorAll('.sub-btn').forEach(btn => btn.addEventListener('click', e => toggleSubscription(+btn.dataset.id, e)));
 }
 
-// FIX PRICE LHS/RHS: always patch individual DOM nodes — never cause a full re-render
 function updateSidebarPrice(instrId, price) {
   if (price == null) return;
   const n = parseFloat(price); if (isNaN(n)) return;
   sidebarPrices[instrId] = n;
-
-  // Patch sidebar item in-place
   const el = document.getElementById(`sp-${instrId}`);
   if (el) {
     el.textContent = '$' + fmt(n, 2);
     el.classList.remove('dim', 'tick'); void el.offsetWidth; el.classList.add('tick');
     setTimeout(() => el.classList.remove('tick'), 400);
   }
-
-  // If this is the active room, also patch the RHS price hero
-  if (instrId === currentRoom) {
-    state.price = n;
-    patchPriceHero();
-  }
+  if (instrId === currentRoom) { state.price = n; patchPriceHero(); }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1151,18 +1103,12 @@ function resetState() {
   state.bbUpper=null; state.bbMiddle=null; state.bbLower=null;
   state.lastUpdated=null;
 }
-
 function selectInstrument(id) {
   if (currentRoom === id) return;
-
-  // FIX STATE LOSS: destroy charts but keep cache. New charts will replayCache.
   destroyCharts();
   currentRoom = id;
   resetState();
-
-  // Seed price from sidebar cache immediately so hero isn't blank
   if (sidebarPrices[id] !== undefined) state.price = sidebarPrices[id];
-
   showDetailPanel();
   renderSidebar(document.getElementById('search').value);
   joinRoom(id);
@@ -1193,15 +1139,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('login-btn').addEventListener('click', doLogin);
   document.getElementById('login-password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
   document.getElementById('logout-btn').addEventListener('click', doLogout);
-
   document.getElementById('filter-toggle').addEventListener('click', () => {
     showSubscribedOnly = !showSubscribedOnly;
     document.getElementById('filter-toggle').classList.toggle('active', showSubscribedOnly);
     renderSidebar(document.getElementById('search').value);
   });
-
   document.getElementById('search').addEventListener('input', e => renderSidebar(e.target.value));
-
   document.getElementById('tab-rsi').addEventListener('click',  () => switchComboTab('rsi'));
   document.getElementById('tab-macd').addEventListener('click', () => switchComboTab('macd'));
 });
