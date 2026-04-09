@@ -51,7 +51,6 @@ func main() {
 	pingNode(ctx, pair2Primary, "pair2-primary(:6383)")
 	pingNode(ctx, pair2Replica, "pair2-replica(:6382)")
 
-	// load balancer — writes to least-loaded primary, reads scatter-gather across replicas
 	lb := chatredis.NewRedisLoadBalancer(pair1Primary, pair1Replica, pair2Primary, pair2Replica)
 
 	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
@@ -76,17 +75,23 @@ func main() {
 	histStore := history.NewStore(lb, pool)
 	http.HandleFunc("/history", history.Handler(histStore))
 
-	// ---- auth routes ----
+	// ---- auth ----
 	authStore := auth.NewStore(pool)
 	authHandler := auth.NewHandler(authStore, histStore, lb)
-	http.HandleFunc("/login", authHandler.Login)
-	http.HandleFunc("/subscribe", authHandler.Subscribe)
-	http.HandleFunc("/unsubscribe", authHandler.Unsubscribe)
-	http.HandleFunc("/subscriptions", authHandler.GetSubscriptions)
+	sessionStore := auth.NewSessionStore(lb)
 
-	// ---- websocket ----
+	// public routes
+	http.HandleFunc("/login", authHandler.Login)
+
+	// protected routes — wrapped with AuthMiddleware
+	http.HandleFunc("/logout", auth.AuthMiddleware(sessionStore, authHandler.Logout))
+	http.HandleFunc("/subscribe", auth.AuthMiddleware(sessionStore, authHandler.Subscribe))
+	http.HandleFunc("/unsubscribe", auth.AuthMiddleware(sessionStore, authHandler.Unsubscribe))
+	http.HandleFunc("/subscriptions", auth.AuthMiddleware(sessionStore, authHandler.GetSubscriptions))
+
+	// ---- websocket — token validated inside ServeWS ----
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ws.ServeWS(h, w, r)
+		ws.ServeWS(h, sessionStore, w, r)
 	})
 	http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
 
