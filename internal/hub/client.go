@@ -1,10 +1,12 @@
+// internal/hub/client.go
 package hub
 
 import "github.com/gorilla/websocket"
 
 type Client struct {
-	ID   string
-	Conn *websocket.Conn
+	ID       string
+	ClientID int // authenticated user ID from session (0 = anonymous)
+	Conn     *websocket.Conn
 
 	// Push path — hub broadcasts everything the client's rooms receive
 	Send chan Message
