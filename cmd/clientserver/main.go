@@ -77,23 +77,23 @@ func main() {
 
 	// ---- auth ----
 	authStore := auth.NewStore(pool)
-	authHandler := auth.NewHandler(authStore, histStore, lb)
-	sessionStore := auth.NewSessionStore(lb)
+	sessionStore := auth.NewSessionStore(pair2Primary) // dedicated node — no LB
+	authHandler := auth.NewHandler(authStore, histStore, lb, sessionStore)
 
-	// public routes
+	// public
 	http.HandleFunc("/login", authHandler.Login)
 
-	// protected routes — wrapped with AuthMiddleware
+	// protected
 	http.HandleFunc("/logout", auth.AuthMiddleware(sessionStore, authHandler.Logout))
 	http.HandleFunc("/subscribe", auth.AuthMiddleware(sessionStore, authHandler.Subscribe))
 	http.HandleFunc("/unsubscribe", auth.AuthMiddleware(sessionStore, authHandler.Unsubscribe))
 	http.HandleFunc("/subscriptions", auth.AuthMiddleware(sessionStore, authHandler.GetSubscriptions))
 
-	// ---- websocket — token validated inside ServeWS ----
+	// websocket
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, sessionStore, w, r)
 	})
-	http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
+	//http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
 
 	port := os.Getenv("CLIENT_PORT")
 	if port == "" {

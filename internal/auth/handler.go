@@ -15,11 +15,11 @@ type Handler struct {
 	sessionStore *SessionStore
 }
 
-func NewHandler(store *Store, histStore *history.Store, lb *chatredis.RedisLoadBalancer) *Handler {
+func NewHandler(store *Store, histStore *history.Store, lb *chatredis.RedisLoadBalancer, ss *SessionStore) *Handler {
 	return &Handler{
 		store:        store,
 		warmer:       NewWarmer(histStore, lb),
-		sessionStore: NewSessionStore(lb),
+		sessionStore: ss,
 	}
 }
 
