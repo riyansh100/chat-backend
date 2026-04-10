@@ -82,6 +82,7 @@ func main() {
 
 	// public
 	http.HandleFunc("/login", authHandler.Login)
+	http.HandleFunc("/register", authHandler.Register)
 
 	// protected
 	http.HandleFunc("/logout", auth.AuthMiddleware(sessionStore, authHandler.Logout))

@@ -89,6 +89,52 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /register
+// Body: {"username":"alice","password":"alice123"}
+// Returns: 201 {"status":"registered"} or 409 if username taken
+func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		errJSON(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+
+	var body struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		errJSON(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if len(body.Username) < 3 {
+		errJSON(w, http.StatusBadRequest, "username must be at least 3 characters")
+		return
+	}
+	if len(body.Password) < 6 {
+		errJSON(w, http.StatusBadRequest, "password must be at least 6 characters")
+		return
+	}
+
+	_, err := h.store.Register(r.Context(), body.Username, body.Password)
+	if err != nil {
+		//ErrUserExists := 0
+		if err == nil {
+			errJSON(w, http.StatusConflict, "username already taken")
+			return
+		}
+		errJSON(w, http.StatusInternalServerError, "registration failed")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "registered"})
+}
+
 // POST /logout
 // Requires: Authorization: Bearer <token>
 // Deletes the session from Redis.

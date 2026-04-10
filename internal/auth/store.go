@@ -19,6 +19,10 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+func (s *Store) Register(context context.Context, username string, password string) (any, any) {
+	panic("unimplemented")
+}
+
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
