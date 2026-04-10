@@ -56,7 +56,11 @@ func main() {
 	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
-	pool, err := pgxpool.New(ctx, pgConnStr)
+	//pool, err := pgxpool.New(ctx, pgConnStr)
+	cfg, _ := pgxpool.ParseConfig(pgConnStr)
+	cfg.MaxConns = 20
+	cfg.MinConns = 4
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		log.Fatal("postgres connect failed:", err)
 	}
