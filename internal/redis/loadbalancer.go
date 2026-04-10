@@ -113,7 +113,7 @@ func NewRedisLoadBalancer(
 // ---- health monitoring ----
 
 func (lb *RedisLoadBalancer) healthLoop() {
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
