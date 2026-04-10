@@ -123,8 +123,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	_, err := h.store.Register(r.Context(), body.Username, body.Password)
 	if err != nil {
-		//ErrUserExists := 0
-		if err == nil {
+		if err == ErrUserExists {
 			errJSON(w, http.StatusConflict, "username already taken")
 			return
 		}
