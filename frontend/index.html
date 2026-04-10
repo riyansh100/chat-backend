@@ -33,13 +33,18 @@
 
   html, body { height: 100%; overflow: hidden; background: var(--bg-0); color: var(--text-primary); font-family: var(--sans); }
 
-  /* LOGIN */
+  /* AUTH OVERLAY */
   #login-overlay { position: fixed; inset: 0; z-index: 100; background: var(--bg-0); display: flex; align-items: center; justify-content: center; }
   #login-overlay.hidden { display: none; }
-  .login-box { background: var(--bg-1); border: 1px solid var(--border-bright); border-radius: 10px; padding: 40px 36px; width: 360px; display: flex; flex-direction: column; gap: 20px; }
+  .login-box { background: var(--bg-1); border: 1px solid var(--border-bright); border-radius: 10px; padding: 36px 36px 32px; width: 380px; display: flex; flex-direction: column; gap: 20px; }
   .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
   .login-title { font-family: var(--mono); font-size: 20px; font-weight: 600; }
-  .login-sub { font-size: 13px; color: var(--text-dim); margin-top: 2px; }
+  .auth-tabs { display: flex; gap: 0; border: 1px solid var(--border-bright); border-radius: 6px; overflow: hidden; }
+  .auth-tab { flex: 1; padding: 8px 0; font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; background: transparent; color: var(--text-dim); border: none; cursor: pointer; transition: background 0.15s, color 0.15s; }
+  .auth-tab.active { background: var(--bg-3); color: var(--accent); }
+  .auth-tab:first-child { border-right: 1px solid var(--border-bright); }
+  .auth-form { display: flex; flex-direction: column; gap: 16px; }
+  .auth-form.hidden { display: none; }
   .login-field { display: flex; flex-direction: column; gap: 6px; }
   .login-label { font-family: var(--mono); font-size: 11px; color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase; }
   .login-input { background: var(--bg-2); border: 1px solid var(--border-bright); border-radius: 5px; padding: 10px 14px; font-family: var(--mono); font-size: 13px; color: var(--text-secondary); outline: none; transition: border-color 0.2s; }
@@ -48,6 +53,9 @@
   .login-btn:hover { opacity: 0.85; } .login-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .login-error { font-family: var(--mono); font-size: 12px; color: var(--red); background: var(--red-dim); border: 1px solid var(--red); border-radius: 4px; padding: 8px 12px; display: none; }
   .login-error.visible { display: block; }
+  .login-success { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 4px; padding: 8px 12px; display: none; }
+  .login-success.visible { display: block; }
+  .pw-hint { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-top: -8px; }
 
   /* LAYOUT */
   #app { display: flex; flex-direction: column; height: 100vh; }
@@ -162,29 +170,55 @@
 </head>
 <body>
 
-<!-- LOGIN -->
+<!-- AUTH OVERLAY -->
 <div id="login-overlay">
   <div class="login-box">
-    <div>
-      <div class="login-brand">
-        <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-          <path d="M4 20 L10 12 L16 16 L22 6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="22" cy="6" r="2" fill="#4ade80"/>
-        </svg>
-        <span class="login-title">Trradeflow</span>
+    <div class="login-brand">
+      <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
+        <path d="M4 20 L10 12 L16 16 L22 6" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="22" cy="6" r="2" fill="#4ade80"/>
+      </svg>
+      <span class="login-title">Trradeflow</span>
+    </div>
+
+    <!-- Tabs -->
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-login">Sign In</button>
+      <button class="auth-tab" id="tab-register">Register</button>
+    </div>
+
+    <!-- Login form -->
+    <div class="auth-form" id="form-login">
+      <div class="login-field">
+        <label class="login-label">Username</label>
+        <input class="login-input" id="login-username" type="text" placeholder="trader" autocomplete="off" spellcheck="false">
       </div>
-      <div class="login-sub">Sign in to your account</div>
+      <div class="login-field">
+        <label class="login-label">Password</label>
+        <input class="login-input" id="login-password" type="password" placeholder="••••••••">
+      </div>
+      <div class="login-error" id="login-error"></div>
+      <button class="login-btn" id="login-btn">Sign In</button>
     </div>
-    <div class="login-field">
-      <label class="login-label">Username</label>
-      <input class="login-input" id="login-username" type="text" placeholder="trader" autocomplete="off" spellcheck="false">
+
+    <!-- Register form -->
+    <div class="auth-form hidden" id="form-register">
+      <div class="login-field">
+        <label class="login-label">Username</label>
+        <input class="login-input" id="reg-username" type="text" placeholder="trader" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="login-field">
+        <label class="login-label">Password</label>
+        <input class="login-input" id="reg-password" type="password" placeholder="Min 6 characters">
+      </div>
+      <div class="login-field">
+        <label class="login-label">Confirm Password</label>
+        <input class="login-input" id="reg-confirm" type="password" placeholder="Re-enter password">
+      </div>
+      <div class="login-error" id="reg-error"></div>
+      <div class="login-success" id="reg-success"></div>
+      <button class="login-btn" id="reg-btn">Create Account</button>
     </div>
-    <div class="login-field">
-      <label class="login-label">Password</label>
-      <input class="login-input" id="login-password" type="password" placeholder="••••••••">
-    </div>
-    <div class="login-error" id="login-error"></div>
-    <button class="login-btn" id="login-btn">Sign In</button>
   </div>
 </div>
 
@@ -601,6 +635,21 @@ function updateComboLegend() {
 }
 
 // ══════════════════════════════════════════════════════════
+//  AUTH TABS
+// ══════════════════════════════════════════════════════════
+function switchAuthTab(tab) {
+  const isLogin = tab === 'login';
+  document.getElementById('tab-login').classList.toggle('active', isLogin);
+  document.getElementById('tab-register').classList.toggle('active', !isLogin);
+  document.getElementById('form-login').classList.toggle('hidden', !isLogin);
+  document.getElementById('form-register').classList.toggle('hidden', isLogin);
+  // clear errors on switch
+  document.getElementById('login-error').classList.remove('visible');
+  document.getElementById('reg-error').classList.remove('visible');
+  document.getElementById('reg-success').classList.remove('visible');
+}
+
+// ══════════════════════════════════════════════════════════
 //  LOGIN / LOGOUT
 // ══════════════════════════════════════════════════════════
 async function doLogin() {
@@ -620,7 +669,6 @@ async function doLogin() {
     const data = await res.json();
     if (!res.ok) { showLoginError(data.error || 'Login failed.'); return; }
 
-    // Store token — all subsequent calls use Authorization: Bearer <token>
     currentUser = {
       id:            data.id,
       username:      data.username,
@@ -642,8 +690,57 @@ function showLoginError(msg) {
   el.textContent = msg; el.classList.add('visible');
 }
 
+// ══════════════════════════════════════════════════════════
+//  REGISTER
+// ══════════════════════════════════════════════════════════
+async function doRegister() {
+  const username = document.getElementById('reg-username').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const confirm  = document.getElementById('reg-confirm').value;
+  const errEl    = document.getElementById('reg-error');
+  const sucEl    = document.getElementById('reg-success');
+  const btn      = document.getElementById('reg-btn');
+
+  errEl.classList.remove('visible');
+  sucEl.classList.remove('visible');
+
+  if (!username || !password) { showRegError('Username and password are required.'); return; }
+  if (username.length < 3)    { showRegError('Username must be at least 3 characters.'); return; }
+  if (password.length < 6)    { showRegError('Password must be at least 6 characters.'); return; }
+  if (password !== confirm)   { showRegError('Passwords do not match.'); return; }
+
+  btn.disabled = true; btn.textContent = 'Creating account...';
+  try {
+    const res  = await fetch(`${API_BASE}/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({username, password}),
+    });
+    const data = await res.json();
+    if (!res.ok) { showRegError(data.error || 'Registration failed.'); return; }
+
+    // Success — show message and switch to login tab after a short delay
+    sucEl.textContent = `Account "${username}" created! Redirecting to sign in...`;
+    sucEl.classList.add('visible');
+    document.getElementById('reg-username').value = '';
+    document.getElementById('reg-password').value = '';
+    document.getElementById('reg-confirm').value  = '';
+
+    setTimeout(() => {
+      switchAuthTab('login');
+      document.getElementById('login-username').value = username;
+      document.getElementById('login-password').focus();
+    }, 1500);
+  } catch(e) { showRegError('Network error.'); }
+  finally { btn.disabled=false; btn.textContent='Create Account'; }
+}
+
+function showRegError(msg) {
+  const el = document.getElementById('reg-error');
+  el.textContent = msg; el.classList.add('visible');
+}
+
 async function doLogout() {
-  // Fire-and-forget: invalidate session on server
   if (currentUser?.token) {
     try {
       await fetch(`${API_BASE}/logout`, { method: 'POST', headers: authHeaders() });
@@ -657,13 +754,13 @@ async function doLogout() {
   Object.keys(cache).forEach(k=>delete cache[k]);
   resetState(); destroyCharts();
 
+  switchAuthTab('login');
   document.getElementById('login-overlay').classList.remove('hidden');
   document.getElementById('user-badge').style.display='none';
   document.getElementById('detail').style.display='none';
   document.getElementById('empty-state').style.display='';
   document.getElementById('login-username').value='';
   document.getElementById('login-password').value='';
-  document.getElementById('login-error').classList.remove('visible');
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1136,8 +1233,22 @@ function setWsStatus(s) {
 //  BOOT
 // ══════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+  // auth tabs
+  document.getElementById('tab-login').addEventListener('click',    () => switchAuthTab('login'));
+  document.getElementById('tab-register').addEventListener('click', () => switchAuthTab('register'));
+
+  // login form
   document.getElementById('login-btn').addEventListener('click', doLogin);
+  document.getElementById('login-username').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('login-password').focus(); });
   document.getElementById('login-password').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+
+  // register form
+  document.getElementById('reg-btn').addEventListener('click', doRegister);
+  document.getElementById('reg-username').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('reg-password').focus(); });
+  document.getElementById('reg-password').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('reg-confirm').focus(); });
+  document.getElementById('reg-confirm').addEventListener('keydown',  e => { if(e.key==='Enter') doRegister(); });
+
+  // app controls
   document.getElementById('logout-btn').addEventListener('click', doLogout);
   document.getElementById('filter-toggle').addEventListener('click', () => {
     showSubscribedOnly = !showSubscribedOnly;
