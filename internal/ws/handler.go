@@ -41,8 +41,8 @@ func ServeWS(h *hub.Hub, ss *auth.SessionStore, w http.ResponseWriter, r *http.R
 		ID:            uuid.NewString(),
 		ClientID:      clientID,
 		Conn:          conn,
-		Send:          make(chan hub.Message, 2048),
-		IndicatorFeed: make(chan hub.Message, 256),
+		Send:          make(chan hub.Message, 256), // Fix 1: buffered — prevents WritePump from blocking hub goroutine
+		IndicatorFeed: make(chan hub.Message, 64),  // Fix 1: buffered
 		Rooms:         make(map[string]bool),
 		Hub:           h,
 		Role:          string(trading.RoleConsumer),
