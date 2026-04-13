@@ -2,8 +2,11 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/riyansh/chat-backend/internal/history"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
@@ -34,9 +37,23 @@ func errJSON(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// isClientGone returns true when the error is a context cancellation or
+// deadline — meaning the HTTP client disconnected before we could respond.
+// Only match strings that unambiguously mean "the HTTP client is gone":
+// "context canceled" and "context deadline exceeded". Do NOT match
+// "conn closed" or "connection reset by peer" — those also appear in pgx
+// errors when the Postgres connection drops, which are real server errors
+// that should return a 500, not be silently dropped.
+func isClientGone(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "context canceled") ||
+		strings.Contains(s, "context deadline exceeded")
+}
+
 // POST /login
-// Body: {"username":"alice","password":"alice123"}
-// Returns: {"token":"<uuid>","id":1,"username":"alice","subscriptions":[101,102]}
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -60,23 +77,27 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	client, err := h.store.Login(r.Context(), body.Username, body.Password)
 	if err != nil {
+		if isClientGone(err) {
+			return
+		}
 		errJSON(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	subs, err := h.store.GetSubscriptions(r.Context(), client.ID)
 	if err != nil {
-		subs = []int{}
+		subs = []int{} // non-fatal — client can still log in
 	}
 
-	// create session token
 	token, err := h.sessionStore.CreateSession(r.Context(), client.ID)
 	if err != nil {
+		if isClientGone(err) {
+			return
+		}
 		errJSON(w, http.StatusInternalServerError, "session creation failed")
 		return
 	}
 
-	// warm cache async — non-blocking
 	if len(subs) > 0 {
 		h.warmer.WarmAsync(client.ID, subs)
 	}
@@ -90,8 +111,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /register
-// Body: {"username":"alice","password":"alice123"}
-// Returns: 201 {"status":"registered"} or 409 if username taken
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -123,6 +142,9 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 	_, err := h.store.Register(r.Context(), body.Username, body.Password)
 	if err != nil {
+		if isClientGone(err) {
+			return
+		}
 		if err == ErrUserExists {
 			errJSON(w, http.StatusConflict, "username already taken")
 			return
@@ -135,8 +157,6 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /logout
-// Requires: Authorization: Bearer <token>
-// Deletes the session from Redis.
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -149,9 +169,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// token already validated by AuthMiddleware — just delete it
 	token := TokenFromContext(r.Context())
 	if err := h.sessionStore.DeleteSession(r.Context(), token); err != nil {
+		if isClientGone(err) {
+			return
+		}
 		errJSON(w, http.StatusInternalServerError, "logout failed")
 		return
 	}
@@ -160,9 +182,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /subscribe
-// Requires: Authorization: Bearer <token>
-// Body: {"instrument_id":101}
-// client_id is derived from the session — NOT from the request body.
 func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		errJSON(w, http.StatusMethodNotAllowed, "POST only")
@@ -184,18 +203,18 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Subscribe(r.Context(), clientID, body.InstrumentID); err != nil {
+		if isClientGone(err) {
+			return
+		}
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	h.warmer.WarmAsync(clientID, []int{body.InstrumentID})
-
 	writeJSON(w, http.StatusOK, map[string]string{"status": "subscribed"})
 }
 
 // POST /unsubscribe
-// Requires: Authorization: Bearer <token>
-// Body: {"instrument_id":101}
 func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		errJSON(w, http.StatusMethodNotAllowed, "POST only")
@@ -217,6 +236,9 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.Unsubscribe(r.Context(), clientID, body.InstrumentID); err != nil {
+		if isClientGone(err) {
+			return
+		}
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -225,8 +247,6 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /subscriptions
-// Requires: Authorization: Bearer <token>
-// client_id derived from session — no query param needed anymore.
 func (h *Handler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method != http.MethodGet {
@@ -238,6 +258,9 @@ func (h *Handler) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 	subs, err := h.store.GetSubscriptions(r.Context(), clientID)
 	if err != nil {
+		if isClientGone(err) {
+			return // client gone — don't write 500
+		}
 		errJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
