@@ -50,13 +50,15 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
-		Register:    make(chan *Client),
-		Unregister:  make(chan *Client),
-		JoinRoom:    make(chan JoinRoomEvent),
-		LeaveRoom:   make(chan LeaveRoomEvent),
-		Broadcast:   make(chan BroadcastEvent),
-		Subscribe:   make(chan SubscribeEvent),
-		Unsubscribe: make(chan UnsubscribeEvent),
+		// Fix 1: buffer all hub channels — eliminates serialised blocking on
+		// the single hub goroutine when 200+ clients connect simultaneously.
+		Register:    make(chan *Client, 512),
+		Unregister:  make(chan *Client, 512),
+		JoinRoom:    make(chan JoinRoomEvent, 2048),
+		LeaveRoom:   make(chan LeaveRoomEvent, 512),
+		Broadcast:   make(chan BroadcastEvent, 4096),
+		Subscribe:   make(chan SubscribeEvent, 256),
+		Unsubscribe: make(chan UnsubscribeEvent, 256),
 	}
 
 	hub.subManager = NewSubscriptionManager()
@@ -301,13 +303,14 @@ func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client
 		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
-		Register:    make(chan *Client),
-		Unregister:  make(chan *Client),
-		JoinRoom:    make(chan JoinRoomEvent),
-		LeaveRoom:   make(chan LeaveRoomEvent),
-		Broadcast:   make(chan BroadcastEvent),
-		Subscribe:   make(chan SubscribeEvent),
-		Unsubscribe: make(chan UnsubscribeEvent),
+		// Fix 1: same buffering as NewHub — clientserver handles the WS clients
+		Register:    make(chan *Client, 512),
+		Unregister:  make(chan *Client, 512),
+		JoinRoom:    make(chan JoinRoomEvent, 2048),
+		LeaveRoom:   make(chan LeaveRoomEvent, 512),
+		Broadcast:   make(chan BroadcastEvent, 4096),
+		Subscribe:   make(chan SubscribeEvent, 256),
+		Unsubscribe: make(chan UnsubscribeEvent, 256),
 		subManager:  NewSubscriptionManager(),
 	}
 }
