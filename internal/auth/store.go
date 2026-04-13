@@ -32,7 +32,7 @@ var ErrUserExists = errors.New("username already taken")
 // bcryptSem caps concurrent bcrypt ops — each takes ~300ms and burns a full CPU core.
 // At 400 users without a cap, all cores saturate and latency explodes.
 // 16 concurrent bcrypts = ~16 cores busy; rest queue here, not in the pg pool.
-var bcryptSem = make(chan struct{}, 16)
+var bcryptSem = make(chan struct{}, 64)
 
 // Register creates a new user with a bcrypt-hashed password.
 func (s *Store) Register(ctx context.Context, username, password string) (*Client, error) {
@@ -48,7 +48,7 @@ func (s *Store) Register(ctx context.Context, username, password string) (*Clien
 		return nil, ErrUserExists
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 10)
 	if err != nil {
 		return nil, fmt.Errorf("bcrypt failed: %w", err)
 	}

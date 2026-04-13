@@ -16,17 +16,14 @@ var validResolutions = map[string]bool{
 	"1m": true, "1h": true,
 }
 
-// expectedPoints returns the minimum points we expect Redis to have.
-// if Redis has less, we fall back to Postgres.
-func expectedPoints(hours int, resolution string) int {
-	if resolution == "1h" {
-		return hours
-	}
-	// 1m: 1 point/min, allow 20% buffer for gaps
-	return int(float64(hours*60) * 0.8)
-}
-
 // Handler serves GET /history?instrument=101&indicator=sma&hours=3&resolution=1m
+//
+// Fallback policy: only hit Postgres when Redis returns an actual error or
+// zero points. Previously we required >= expectedPoints(hours, resolution)
+// which caused Postgres fallbacks on every request when the backend had been
+// running < hours (e.g. 30min uptime → only 30 points vs 144 required for
+// 3h × 0.8). Under 300-user load that meant 300 simultaneous Postgres queries
+// → 1900ms p95 on /history.
 func Handler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -76,13 +73,16 @@ func Handler(store *Store) http.HandlerFunc {
 		// --- try Redis first ---
 		points, err := store.GetRange(ctx, indicator, instrumentID, resolution, fromUnix, now)
 
-		// --- fall back to Postgres if Redis is empty or insufficient ---
-		if err != nil || len(points) < expectedPoints(hours, resolution) {
+		// --- fall back to Postgres only on error or truly empty ---
+		// Do NOT require a minimum point count — Redis may legitimately have
+		// fewer points than the full window if the server recently restarted.
+		// Serving partial Redis data is always faster than a Postgres round-trip.
+		if err != nil || len(points) == 0 {
 			pgPoints, pgErr := store.FallbackFromPostgres(ctx, indicator, instrumentID, fromUnix, now)
 			if pgErr == nil && len(pgPoints) > 0 {
 				points = pgPoints
 				source = "postgres"
-				// backfill Redis async so next request is fast
+				// backfill Redis async so next request is a Redis hit
 				go store.BackfillRedis(indicator, instrumentID, resolution, pgPoints)
 			}
 		}
