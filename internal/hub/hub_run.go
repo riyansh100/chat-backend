@@ -11,6 +11,11 @@ import (
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
+// histSem limits concurrent history Redis reads across all clients.
+// 150 goroutines (6 indicators × 25 rooms) firing at once per client connect
+// caused a Redis read storm. Cap at 32 concurrent reads.
+var histSem = make(chan struct{}, 32)
+
 const maxDroppedMessages = 5
 
 func (h *Hub) Run() {
@@ -76,6 +81,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.SMAStore, id int) {
+						histSem <- struct{}{}        // Fix 4: acquire slot
+						defer func() { <-histSem }() // Fix 4: release slot
 						for _, res := range []struct {
 							resolution string
 							n          int
@@ -105,6 +112,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.OHLCStore, id int) {
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						entries, err := store.GetLast(context.Background(), id, 60)
 						if err != nil || len(entries) == 0 {
 							return
@@ -129,6 +138,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.EMAStore, id int) {
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						for _, res := range []struct {
 							resolution string
 							n          int
@@ -158,6 +169,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.BBStore, id int) {
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						entries, err := store.GetLast(context.Background(), id, 60)
 						if err != nil || len(entries) == 0 {
 							return
@@ -182,6 +195,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.RSIStore, id int) {
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						for _, res := range []struct {
 							resolution string
 							n          int
@@ -211,6 +226,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.MACDStore, id int) {
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						for _, res := range []struct {
 							resolution string
 							n          int
