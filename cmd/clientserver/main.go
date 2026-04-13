@@ -58,7 +58,7 @@ func main() {
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	//pool, err := pgxpool.New(ctx, pgConnStr)
 	cfg, _ := pgxpool.ParseConfig(pgConnStr)
-	cfg.MaxConns = 20
+	cfg.MaxConns = 50 // Fix 3: was 20 — saturated under 200 concurrent logins (bcrypt ~300ms each)
 	cfg.MinConns = 4
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -81,7 +81,7 @@ func main() {
 
 	// ---- auth ----
 	authStore := auth.NewStore(pool)
-	sessionStore := auth.NewSessionStore(pair2Primary) // dedicated node — no LB
+	sessionStore := auth.NewSessionStore(pair2Primary, lb) // Fix 2: lb for scatter-gather reads
 	authHandler := auth.NewHandler(authStore, histStore, lb, sessionStore)
 
 	// public
