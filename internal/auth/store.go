@@ -29,6 +29,11 @@ func NewStore(pool *pgxpool.Pool) *Store {
 // ErrUserExists is returned when a username is already taken.
 var ErrUserExists = errors.New("username already taken")
 
+// bcryptSem caps concurrent bcrypt ops — each takes ~300ms and burns a full CPU core.
+// At 400 users without a cap, all cores saturate and latency explodes.
+// 16 concurrent bcrypts = ~16 cores busy; rest queue here, not in the pg pool.
+var bcryptSem = make(chan struct{}, 16)
+
 // Register creates a new user with a bcrypt-hashed password.
 func (s *Store) Register(ctx context.Context, username, password string) (*Client, error) {
 	var exists bool
@@ -60,13 +65,25 @@ func (s *Store) Register(ctx context.Context, username, password string) (*Clien
 }
 
 // Login validates username/password against the stored bcrypt hash.
+//
+// CRITICAL: the pg connection is released BEFORE bcrypt runs.
+// bcrypt takes ~300ms and is pure CPU — holding a pool conn during it
+// exhausts MaxConns instantly under load (400 users × 300ms = pool fully occupied).
+// Fix: Acquire conn → Scan hash → Release conn → bcrypt (throttled by bcryptSem).
 func (s *Store) Login(ctx context.Context, username, password string) (*Client, error) {
+	// Step 1: fetch hash — acquire and release conn immediately after Scan
 	var c Client
 	var hash string
-	err := s.pool.QueryRow(ctx,
+
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("login pool acquire failed: %w", err)
+	}
+	err = conn.QueryRow(ctx,
 		`SELECT id, username, password FROM clients WHERE username=$1`,
 		username,
 	).Scan(&c.ID, &c.Username, &hash)
+	conn.Release() // release BEFORE bcrypt — frees the conn for other requests
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("invalid credentials")
@@ -74,7 +91,12 @@ func (s *Store) Login(ctx context.Context, username, password string) (*Client, 
 		return nil, fmt.Errorf("login query failed: %w", err)
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+	// Step 2: bcrypt outside the pool, throttled by semaphore
+	bcryptSem <- struct{}{}
+	bcryptErr := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	<-bcryptSem
+
+	if bcryptErr != nil {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 	return &c, nil
