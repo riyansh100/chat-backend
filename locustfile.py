@@ -75,10 +75,11 @@ def register_seed_users(environment, **kwargs):
 #  HTTP USER — REST endpoints (login, subscribe, history, logout)
 # ══════════════════════════════════════════════════════════════════════════════
 class TradeFlowHttpUser(HttpUser):
-    wait_time = between(2, 8)
+    wait_time = between(0.5, 2)
     token     = None
 
     def on_start(self):
+        time.sleep(random.uniform(0, 2)) 
         user = random.choice(SEED_USERS)
         with self.client.post(
             "/login",
@@ -144,11 +145,12 @@ class TradeFlowHttpUser(HttpUser):
 #  WEBSOCKET USER — login + persistent WS + join all 25 rooms
 # ══════════════════════════════════════════════════════════════════════════════
 class WebSocketUser(HttpUser):
-    wait_time = between(30, 60)
+    wait_time = between(0.5, 2)
     token     = None
     ws_conn   = None
 
     def on_start(self):
+        time.sleep(random.uniform(0, 2)) 
         user = random.choice(SEED_USERS)
         with self.client.post(
             "/login",

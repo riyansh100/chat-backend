@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/riyansh/chat-backend/internal/history"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
@@ -76,6 +77,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	client, err := h.store.Login(r.Context(), body.Username, body.Password)
+
 	if err != nil {
 		if isClientGone(err) {
 			return
@@ -84,9 +86,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subs, err := h.store.GetSubscriptions(r.Context(), client.ID)
+	subsCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	subs, err := h.store.GetSubscriptions(subsCtx, client.ID)
 	if err != nil {
-		subs = []int{} // non-fatal — client can still log in
+		subs = []int{}
 	}
 
 	token, err := h.sessionStore.CreateSession(r.Context(), client.ID)
