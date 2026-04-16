@@ -23,6 +23,11 @@ import (
 	"github.com/riyansh/chat-backend/internal/ws"
 )
 
+// natsWorkers is the number of goroutines draining the JetStream consumer.
+// 16 workers keeps the NATS consumer backlog near-zero at 20k msg/s while
+// leaving plenty of cores for WS read/write pumps.
+const natsWorkers = 16
+
 func pingNode(ctx context.Context, c *redis.Client, name string) {
 	if err := c.Ping(ctx).Err(); err != nil {
 		log.Printf("[ClientServer] %s ping FAILED (%v) — lb will route around it", name, err)
@@ -60,7 +65,7 @@ func main() {
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
 	cfg, _ := pgxpool.ParseConfig(pgConnStr)
-	cfg.MaxConns = 50 // Fix 3: was 20 — saturated under 200 concurrent logins (bcrypt ~300ms each)
+	cfg.MaxConns = 50
 	cfg.MinConns = 4
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -70,7 +75,7 @@ func main() {
 	log.Println("[ClientServer] Postgres connected")
 
 	// ---- NATS ----
-	natsURL := os.Getenv("NATS_URL") // defaults to nats://localhost:4222
+	natsURL := os.Getenv("NATS_URL")
 	nc, err := internalnats.Connect(natsURL)
 	if err != nil {
 		log.Fatal("[ClientServer] NATS connect failed:", err)
@@ -91,7 +96,7 @@ func main() {
 
 	// ---- auth ----
 	authStore := auth.NewStore(pool)
-	sessionStore := auth.NewSessionStore(pair2Primary, lb) // Fix 2: lb for scatter-gather reads
+	sessionStore := auth.NewSessionStore(pair2Primary, lb)
 	authHandler := auth.NewHandler(authStore, histStore, lb, sessionStore)
 
 	// public
@@ -119,10 +124,28 @@ func main() {
 	}
 }
 
-// consumeAnalyticsEvents is the replacement for the old subscribeAnalyticsEvents.
-// It creates a durable push consumer on the ANALYTICS stream and fans out each
-// event to the hub's Broadcast channel and topic subscriptions — identical
-// behaviour to the Redis pub/sub path, just over NATS JetStream.
+// natsEnvelope mirrors the analyticsEvent shape published by the dataserver.
+type natsEnvelope struct {
+	Room   string          `json:"room"`
+	Type   string          `json:"type"`
+	Data   json.RawMessage `json:"data"`
+	Topic  string          `json:"topic"`
+	Origin string          `json:"origin"`
+}
+
+// consumeAnalyticsEvents creates a durable JetStream consumer and fans out
+// each analytics event to the hub using natsWorkers parallel goroutines.
+//
+// Single goroutine bottleneck: msgs.Next() is a blocking pull that processes
+// ~2-3k msg/s. At 300 instruments under 300 Locust users (~20k msg/s),
+// the single loop falls behind, MaxAckPending (4096) fills, the dataserver's
+// Publish blocks, its Broadcast channel backs up, and the pipeline stalls —
+// manifesting as "Host is down" on new WS connections.
+//
+// Fix: 16 parallel workers drain workCh concurrently. The main loop only
+// pulls + acks (fast path); workers handle unmarshal + hub fanout.
+// Acking before processing is intentional — stale market ticks are worse
+// than dropped ones.
 func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 	js, err := jetstream.New(nc)
 	if err != nil {
@@ -132,7 +155,7 @@ func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 	consumer, err := js.CreateOrUpdateConsumer(ctx, internalnats.StreamName, jetstream.ConsumerConfig{
 		Name:          internalnats.ConsumerName,
 		Durable:       internalnats.ConsumerName,
-		DeliverPolicy: jetstream.DeliverNewPolicy, // only live events; no replay on restart
+		DeliverPolicy: jetstream.DeliverNewPolicy,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		FilterSubject: internalnats.StreamSubject,
 		MaxAckPending: 4096,
@@ -145,40 +168,54 @@ func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 	if err != nil {
 		log.Fatalf("[ClientServer] consumer.Messages: %v", err)
 	}
-	log.Println("[ClientServer] NATS JetStream consumer started on", internalnats.StreamSubject)
+	log.Printf("[ClientServer] NATS JetStream consumer started (%d workers) on %s",
+		natsWorkers, internalnats.StreamSubject)
 
+	// workCh buffers raw NATS messages before workers pick them up.
+	// Sized to 2× MaxAckPending so the pull loop is never blocked by workers.
+	workCh := make(chan jetstream.Msg, 8192)
+
+	// Parallel fanout workers.
+	for i := 0; i < natsWorkers; i++ {
+		go func() {
+			for msg := range workCh {
+				var env natsEnvelope
+				if err := json.Unmarshal(msg.Data(), &env); err != nil {
+					continue
+				}
+
+				hubMsg := hub.Message{Type: env.Type, Data: env.Data}
+
+				if env.Room != "" {
+					h.Broadcast <- hub.BroadcastEvent{
+						Room:    env.Room,
+						Origin:  env.Origin,
+						Message: hubMsg,
+					}
+				}
+
+				if env.Topic != "" {
+					h.SubManager().Fanout(env.Topic, hubMsg)
+				}
+			}
+		}()
+	}
+
+	// Main loop: pull + ack immediately, dispatch to workers.
 	for {
 		msg, err := msgs.Next()
 		if err != nil {
-			// Context cancelled or connection closed — exit cleanly.
 			log.Printf("[ClientServer] NATS consumer stopped: %v", err)
+			close(workCh)
 			return
 		}
 		msg.Ack()
 
-		var env struct {
-			Room   string          `json:"room"`
-			Type   string          `json:"type"`
-			Data   json.RawMessage `json:"data"`
-			Topic  string          `json:"topic"`
-			Origin string          `json:"origin"`
-		}
-		if err := json.Unmarshal(msg.Data(), &env); err != nil {
-			continue
-		}
-
-		hubMsg := hub.Message{Type: env.Type, Data: env.Data}
-
-		if env.Room != "" {
-			h.Broadcast <- hub.BroadcastEvent{
-				Room:    env.Room,
-				Origin:  env.Origin,
-				Message: hubMsg,
-			}
-		}
-
-		if env.Topic != "" {
-			h.SubManager().Fanout(env.Topic, hubMsg)
+		select {
+		case workCh <- msg:
+		default:
+			// workCh full — workers temporarily saturated.
+			// Drop: live price ticks are superseded by the next one anyway.
 		}
 	}
 }

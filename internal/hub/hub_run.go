@@ -14,9 +14,18 @@ import (
 // histSem limits concurrent history Redis reads across all clients.
 // 150 goroutines (6 indicators × 25 rooms) firing at once per client connect
 // caused a Redis read storm. Cap at 32 concurrent reads.
-var histSem = make(chan struct{}, 32)
+// histSem limits concurrent history Redis reads across all clients.
+// Raised from 32 → 64: at 300 clients each joining 25 rooms, the semaphore
+// was the bottleneck that kept history goroutines queued, causing Send channels
+// to fill before history was delivered and triggering the drop-disconnect logic.
+var histSem = make(chan struct{}, 64)
 
-const maxDroppedMessages = 5
+// maxDroppedMessages: how many consecutive Send-channel misses before we
+// force-disconnect a client. Raised from 5 → 50 so a temporarily slow client
+// (e.g. one receiving a burst of 150 history frames on join) isn't killed before
+// its WritePump drains the backlog. A genuinely dead client will still be
+// evicted — it just gets more runway first.
+const maxDroppedMessages = 50
 
 func (h *Hub) Run() {
 	for {

@@ -38,11 +38,13 @@ func ServeWS(h *hub.Hub, ss *auth.SessionStore, w http.ResponseWriter, r *http.R
 	}
 
 	client := &hub.Client{
-		ID:            uuid.NewString(),
-		ClientID:      clientID,
-		Conn:          conn,
-		Send:          make(chan hub.Message, 256), // Fix 1: buffered — prevents WritePump from blocking hub goroutine
-		IndicatorFeed: make(chan hub.Message, 64),  // Fix 1: buffered
+		ID:       uuid.NewString(),
+		ClientID: clientID,
+		Conn:     conn,
+		Send:     make(chan hub.Message, 1024), // raised 256→1024: at 300 clients each joining 25 rooms, 150 history
+		//   goroutines fire simultaneously on connect; the old 256 buffer filled
+		//   in milliseconds, triggering the drop-disconnect at maxDroppedMessages.
+		IndicatorFeed: make(chan hub.Message, 64),
 		Rooms:         make(map[string]bool),
 		Hub:           h,
 		Role:          string(trading.RoleConsumer),
