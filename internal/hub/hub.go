@@ -3,16 +3,20 @@ package hub
 
 import (
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/cache"
 	"github.com/riyansh/chat-backend/internal/metrics"
+	internalnats "github.com/riyansh/chat-backend/internal/nats"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
 type Hub struct {
 	Rooms       map[string]*Room
 	RedisClient *goredis.Client              // write client — least-loaded primary (from lb)
+	NatsConn    *nats.Conn                   // NATS connection for analytics pub/sub
+	natsPub     *internalnats.Publisher      // JetStream publisher (dataserver only)
 	lb          *chatredis.RedisLoadBalancer // load balancer — owns all 4 Redis clients
 	pgPool      *pgxpool.Pool
 

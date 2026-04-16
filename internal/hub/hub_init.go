@@ -8,11 +8,13 @@ import (
 	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/riyansh/chat-backend/internal/analytics"
 	"github.com/riyansh/chat-backend/internal/cache"
 	"github.com/riyansh/chat-backend/internal/history"
 	"github.com/riyansh/chat-backend/internal/metrics"
+	internalnats "github.com/riyansh/chat-backend/internal/nats"
 	"github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -24,15 +26,10 @@ type analyticsEvent struct {
 	Origin string          `json:"origin"`
 }
 
-func publish(ctx context.Context, rdb *goredis.Client, ev analyticsEvent) {
-	payload, _ := json.Marshal(ev)
-	rdb.Publish(ctx, "analytics:events", payload)
-}
-
 // NewHub creates a full hub with all 6 engines (data server mode).
-// lb = RedisLoadBalancer managing both pairs.
-// rdb = write client (used for pub/sub — must be a concrete *redis.Client).
-func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool) *Hub {
+// nc must be connected; EnsureStream is called here so the stream exists
+// before any engine goroutine tries to publish.
+func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool, nc *nats.Conn) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -41,17 +38,23 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 	m := &metrics.HubMetrics{}
 	m.StartLogger()
 
+	js, err := internalnats.EnsureStream(context.Background(), nc)
+	if err != nil {
+		panic(err)
+	}
+	pub := internalnats.NewPublisher(js)
+
 	hub := &Hub{
 		InstanceID:  instanceID,
 		Rooms:       make(map[string]*Room),
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
+		NatsConn:    nc,
+		natsPub:     pub,
 		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
-		// Fix 1: buffer all hub channels — eliminates serialised blocking on
-		// the single hub goroutine when 200+ clients connect simultaneously.
 		Register:    make(chan *Client, 512),
 		Unregister:  make(chan *Client, 512),
 		JoinRoom:    make(chan JoinRoomEvent, 2048),
@@ -65,6 +68,10 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 	hub.registry = analytics.NewRegistry()
 
 	histStore := history.NewStore(lb, pool)
+
+	publish := func(ev analyticsEvent) {
+		pub.Publish(context.Background(), ev)
+	}
 
 	// ---- SMA ----
 	sma := analytics.NewEngine(20)
@@ -80,7 +87,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 			"timestamp": e.Timestamp, "resolution": e.Resolution,
 		})
 		room := strconv.Itoa(e.InstrumentID)
-		publish(context.Background(), rdb, analyticsEvent{
+		publish(analyticsEvent{
 			Room: room, Type: "sma_update", Data: json.RawMessage(data),
 			Topic: "sma:" + room, Origin: instanceID,
 		})
@@ -120,7 +127,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 				"timestamp": e.Timestamp,
 			})
 			room := strconv.Itoa(e.InstrumentID)
-			publish(context.Background(), rdb, analyticsEvent{
+			publish(analyticsEvent{
 				Room: room, Type: "ohlc_update", Data: json.RawMessage(data),
 				Topic: "ohlc:" + room, Origin: instanceID,
 			})
@@ -148,7 +155,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 			"timestamp": e.Timestamp, "resolution": e.Resolution,
 		})
 		room := strconv.Itoa(e.InstrumentID)
-		publish(context.Background(), rdb, analyticsEvent{
+		publish(analyticsEvent{
 			Room: room, Type: "ema_update", Data: json.RawMessage(data),
 			Topic: "ema:" + room, Origin: instanceID,
 		})
@@ -188,7 +195,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 				"timestamp": e.Timestamp, "resolution": e.Resolution,
 			})
 			room := strconv.Itoa(e.InstrumentID)
-			publish(context.Background(), rdb, analyticsEvent{
+			publish(analyticsEvent{
 				Room: room, Type: "bb_update", Data: json.RawMessage(data),
 				Topic: "bb:" + room, Origin: instanceID,
 			})
@@ -216,7 +223,7 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 			"timestamp": e.Timestamp, "resolution": e.Resolution,
 		})
 		room := strconv.Itoa(e.InstrumentID)
-		publish(context.Background(), rdb, analyticsEvent{
+		publish(analyticsEvent{
 			Room: room, Type: "rsi_update", Data: json.RawMessage(data),
 			Topic: "rsi:" + room, Origin: instanceID,
 		})
@@ -255,14 +262,14 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 			"timestamp": e.Timestamp, "resolution": e.Resolution,
 		})
 		room := strconv.Itoa(e.InstrumentID)
-		publish(context.Background(), rdb, analyticsEvent{
+		publish(analyticsEvent{
 			Room: room, Type: "macd_update", Data: json.RawMessage(data),
 			Topic: "macd:" + room, Origin: instanceID,
 		})
-		m, _ := json.Marshal(map[string]float64{
+		mv, _ := json.Marshal(map[string]float64{
 			"macd_line": e.MACDLine, "signal_line": e.SignalLine, "histogram": e.Histogram,
 		})
-		histStore.Write1m(context.Background(), "macd", e.InstrumentID, e.Timestamp/1e9, string(m))
+		histStore.Write1m(context.Background(), "macd", e.InstrumentID, e.Timestamp/1e9, string(mv))
 	}
 	go func() {
 		for e := range hub.macdEngine.Output() {
@@ -285,7 +292,9 @@ func NewHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *
 }
 
 // NewClientHub creates a hub with NO engines (client server mode).
-func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool) *Hub {
+// nc is stored on the hub so clientserver/main.go can start the NATS
+// JetStream consumer after calling this function.
+func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client, lb *redis.RedisLoadBalancer, pool *pgxpool.Pool, nc *nats.Conn) *Hub {
 	l1Cache, err := cache.NewL1Cache()
 	if err != nil {
 		panic(err)
@@ -300,10 +309,10 @@ func NewClientHub(instanceID string, redisCache redis.Cache, rdb *goredis.Client
 		redisCache:  redisCache,
 		l1:          l1Cache,
 		RedisClient: rdb,
+		NatsConn:    nc,
 		lb:          lb,
 		pgPool:      pool,
 		Metrics:     m,
-		// Fix 1: same buffering as NewHub — clientserver handles the WS clients
 		Register:    make(chan *Client, 512),
 		Unregister:  make(chan *Client, 512),
 		JoinRoom:    make(chan JoinRoomEvent, 2048),

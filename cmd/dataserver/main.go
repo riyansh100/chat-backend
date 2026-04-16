@@ -17,6 +17,7 @@ import (
 	"github.com/riyansh/chat-backend/internal/hub"
 	"github.com/riyansh/chat-backend/internal/leader"
 	"github.com/riyansh/chat-backend/internal/metrics"
+	internalnats "github.com/riyansh/chat-backend/internal/nats"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -69,6 +70,14 @@ func main() {
 		port = "8081"
 	}
 
+	// ---- NATS ----
+	natsURL := os.Getenv("NATS_URL") // defaults to nats://localhost:4222
+	nc, err := internalnats.Connect(natsURL)
+	if err != nil {
+		log.Fatal("[DataServer] NATS connect failed:", err)
+	}
+	defer nc.Drain()
+
 	var hubRef *hub.Hub
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +116,7 @@ func main() {
 		func(leaderCtx context.Context) {
 			log.Println("[DataServer] elected as leader — starting engines")
 
-			h := hub.NewHub(instanceID, redisCache, pair1Primary, lb, pool)
+			h := hub.NewHub(instanceID, redisCache, pair1Primary, lb, pool, nc)
 			hubRef = h
 			go h.Run()
 

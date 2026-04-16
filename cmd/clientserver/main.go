@@ -11,11 +11,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/riyansh/chat-backend/internal/auth"
 	"github.com/riyansh/chat-backend/internal/history"
 	"github.com/riyansh/chat-backend/internal/hub"
+	internalnats "github.com/riyansh/chat-backend/internal/nats"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 	"github.com/riyansh/chat-backend/internal/ws"
 )
@@ -56,7 +59,6 @@ func main() {
 	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
 
 	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
-	//pool, err := pgxpool.New(ctx, pgConnStr)
 	cfg, _ := pgxpool.ParseConfig(pgConnStr)
 	cfg.MaxConns = 50 // Fix 3: was 20 — saturated under 200 concurrent logins (bcrypt ~300ms each)
 	cfg.MinConns = 4
@@ -67,11 +69,19 @@ func main() {
 	defer pool.Close()
 	log.Println("[ClientServer] Postgres connected")
 
-	h := hub.NewClientHub(instanceID, redisCache, pair1Primary, lb, pool)
+	// ---- NATS ----
+	natsURL := os.Getenv("NATS_URL") // defaults to nats://localhost:4222
+	nc, err := internalnats.Connect(natsURL)
+	if err != nil {
+		log.Fatal("[ClientServer] NATS connect failed:", err)
+	}
+	defer nc.Drain()
 
-	go subscribeAnalyticsEvents(ctx, pair1Primary, h)
+	h := hub.NewClientHub(instanceID, redisCache, pair1Primary, lb, pool, nc)
+
 	hub.StartRedisSubscriber(ctx, pair1Primary, h)
 
+	go consumeAnalyticsEvents(ctx, nc, h)
 	go h.Run()
 	log.Println("[ClientServer] hub running (no engines)")
 
@@ -98,7 +108,6 @@ func main() {
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		ws.ServeWS(h, sessionStore, w, r)
 	})
-	//http.HandleFunc("/ws/ingest", ws.IngestHandler(h))
 
 	port := os.Getenv("CLIENT_PORT")
 	if port == "" {
@@ -110,11 +119,43 @@ func main() {
 	}
 }
 
-func subscribeAnalyticsEvents(ctx context.Context, rdb *redis.Client, h *hub.Hub) {
-	sub := rdb.Subscribe(ctx, "analytics:events")
-	log.Println("[ClientServer] subscribed to analytics:events")
+// consumeAnalyticsEvents is the replacement for the old subscribeAnalyticsEvents.
+// It creates a durable push consumer on the ANALYTICS stream and fans out each
+// event to the hub's Broadcast channel and topic subscriptions — identical
+// behaviour to the Redis pub/sub path, just over NATS JetStream.
+func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
+	js, err := jetstream.New(nc)
+	if err != nil {
+		log.Fatalf("[ClientServer] jetstream init: %v", err)
+	}
 
-	for msg := range sub.Channel() {
+	consumer, err := js.CreateOrUpdateConsumer(ctx, internalnats.StreamName, jetstream.ConsumerConfig{
+		Name:          internalnats.ConsumerName,
+		Durable:       internalnats.ConsumerName,
+		DeliverPolicy: jetstream.DeliverNewPolicy, // only live events; no replay on restart
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		FilterSubject: internalnats.StreamSubject,
+		MaxAckPending: 4096,
+	})
+	if err != nil {
+		log.Fatalf("[ClientServer] create consumer: %v", err)
+	}
+
+	msgs, err := consumer.Messages()
+	if err != nil {
+		log.Fatalf("[ClientServer] consumer.Messages: %v", err)
+	}
+	log.Println("[ClientServer] NATS JetStream consumer started on", internalnats.StreamSubject)
+
+	for {
+		msg, err := msgs.Next()
+		if err != nil {
+			// Context cancelled or connection closed — exit cleanly.
+			log.Printf("[ClientServer] NATS consumer stopped: %v", err)
+			return
+		}
+		msg.Ack()
+
 		var env struct {
 			Room   string          `json:"room"`
 			Type   string          `json:"type"`
@@ -122,7 +163,7 @@ func subscribeAnalyticsEvents(ctx context.Context, rdb *redis.Client, h *hub.Hub
 			Topic  string          `json:"topic"`
 			Origin string          `json:"origin"`
 		}
-		if err := json.Unmarshal([]byte(msg.Payload), &env); err != nil {
+		if err := json.Unmarshal(msg.Data(), &env); err != nil {
 			continue
 		}
 
