@@ -2,7 +2,7 @@
 TradeFlow Locust Load Test
 ==========================
 Run:
-    locust -f locustfile.py --host=http://192.168.1.71
+    locust -f locustfile.py --host=http://localhost
 
 Open: http://localhost:8089
 """
@@ -33,11 +33,25 @@ SEED_USERS = [
 ]
 
 INSTRUMENT_IDS = list(range(101, 126))  # 101–125
-WS_BASE        = "ws://192.168.1.71/ws"
-HOST           = "http://192.168.1.71"
+
+# Derived at test-start from the --host flag; see _configure_hosts() below.
+WS_BASE = None
+HOST    = None
 
 _users_registered = False
 _register_lock    = threading.Lock()
+
+
+@events.test_start.add_listener
+def _configure_hosts(environment, **kwargs):
+    """Derive WS_BASE and HOST from the --host CLI flag so no IPs are hardcoded."""
+    global WS_BASE, HOST
+    HOST = environment.host.rstrip("/")
+    # http -> ws, https -> wss
+    ws_scheme = "wss" if HOST.startswith("https") else "ws"
+    ws_host   = HOST.replace("https://", "").replace("http://", "")
+    WS_BASE   = f"{ws_scheme}://{ws_host}/ws"
+    print(f"[setup] HOST={HOST}  WS_BASE={WS_BASE}")
 
 
 @events.test_start.add_listener
@@ -51,11 +65,12 @@ def register_seed_users(environment, **kwargs):
     with _register_lock:
         if _users_registered:
             return
+        host = environment.host.rstrip("/")
         print("\n[setup] Registering seed users...")
         for u in SEED_USERS:
             try:
                 r = requests.post(
-                    f"{HOST}/register",
+                    f"{host}/register",
                     json={"username": u["username"], "password": u["password"]},
                     timeout=10,
                 )
@@ -194,9 +209,13 @@ class WebSocketUser(HttpUser):
         )
 
     def _on_error(self, ws, error):
+        # Report errors under a distinct name so they don't inflate
+        # message_received failure counts. OSError(64) here means the
+        # server closed the socket — visible as "WS connection_error" in
+        # the Locust UI so you can track it separately from normal traffic.
         events.request.fire(
             request_type="WS",
-            name="message_received",
+            name="connection_error",
             response_time=0,
             response_length=0,
             exception=error,
