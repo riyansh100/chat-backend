@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -124,26 +123,14 @@ func main() {
 	}
 }
 
-// natsEnvelope mirrors the analyticsEvent shape published by the dataserver.
-type natsEnvelope struct {
-	Room   string          `json:"room"`
-	Type   string          `json:"type"`
-	Data   json.RawMessage `json:"data"`
-	Topic  string          `json:"topic"`
-	Origin string          `json:"origin"`
-}
-
 // consumeAnalyticsEvents creates a durable JetStream consumer and fans out
 // each analytics event to the hub using natsWorkers parallel goroutines.
 //
-// Single goroutine bottleneck: msgs.Next() is a blocking pull that processes
-// ~2-3k msg/s. At 300 instruments under 300 Locust users (~20k msg/s),
-// the single loop falls behind, MaxAckPending (4096) fills, the dataserver's
-// Publish blocks, its Broadcast channel backs up, and the pipeline stalls —
-// manifesting as "Host is down" on new WS connections.
+// Binary frames: the dataserver now publishes raw binary frames (22–46 bytes)
+// instead of JSON envelopes (~80–120 bytes).  Workers call
+// hub.DecodeFrameToMessage which decodes the binary frame and returns a
+// hub.Message ready to push to WebSocket clients (which still receive JSON).
 //
-// Fix: 16 parallel workers drain workCh concurrently. The main loop only
-// pulls + acks (fast path); workers handle unmarshal + hub fanout.
 // Acking before processing is intentional — stale market ticks are worse
 // than dropped ones.
 func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
@@ -175,28 +162,30 @@ func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 	// Sized to 2× MaxAckPending so the pull loop is never blocked by workers.
 	workCh := make(chan jetstream.Msg, 8192)
 
-	// Parallel fanout workers.
+	// Parallel fanout workers decode binary frames → hub.Messages.
 	for i := 0; i < natsWorkers; i++ {
 		go func() {
 			for msg := range workCh {
-				var env natsEnvelope
-				if err := json.Unmarshal(msg.Data(), &env); err != nil {
+				// DecodeFrameToMessage: binary frame → room string + hub.Message
+				// The hub.Message.Data is a plain map that will be JSON-marshalled
+				// only when written to the WebSocket — the binary→JSON boundary.
+				room, hubMsg, err := hub.DecodeFrameToMessage(msg.Data())
+				if err != nil {
+					log.Printf("[NATS worker] decode error: %v", err)
 					continue
 				}
 
-				hubMsg := hub.Message{Type: env.Type, Data: env.Data}
-
-				if env.Room != "" {
-					h.Broadcast <- hub.BroadcastEvent{
-						Room:    env.Room,
-						Origin:  env.Origin,
-						Message: hubMsg,
-					}
+				// Push model: broadcast to everyone in the room
+				h.Broadcast <- hub.BroadcastEvent{
+					Room:    room,
+					Origin:  "", // not echoed back via Redis pub-sub
+					Message: hubMsg,
 				}
 
-				if env.Topic != "" {
-					h.SubManager().Fanout(env.Topic, hubMsg)
-				}
+				// Pull model: fan out to topic subscribers
+				// Topic format matches what the dataserver used to encode: "sma:101" etc.
+				topic := hubMsg.Type[:len(hubMsg.Type)-len("_update")] + ":" + room
+				h.SubManager().Fanout(topic, hubMsg)
 			}
 		}()
 	}
