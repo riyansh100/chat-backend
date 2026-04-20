@@ -3,13 +3,13 @@ package analytics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -53,16 +53,11 @@ func (s *MACDStore) writeRedis(ctx context.Context, event MACDUpdateEvent) error
 		k = macdKey1s(event.InstrumentID)
 		maxEntries = maxMACDEntries1s
 	}
-	payload, err := json.Marshal(map[string]interface{}{
-		"macd_line": event.MACDLine, "signal_line": event.SignalLine,
-		"histogram": event.Histogram, "ts": event.Timestamp,
-	})
-	if err != nil {
-		return err
-	}
+	// 24-byte binary member replaces the old JSON object string
+	member := bincod.EncodeMACD(event.MACDLine, event.SignalLine, event.Histogram)
 	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
-	if err := rdb.ZAdd(ctx, k, redis.Z{Score: float64(ts), Member: string(payload)}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, k, redis.Z{Score: float64(ts), Member: member}).Err(); err != nil {
 		return err
 	}
 	rdb.ZRemRangeByRank(ctx, k, 0, -maxEntries-1)
