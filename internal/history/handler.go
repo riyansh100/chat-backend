@@ -1,3 +1,4 @@
+// internal/history/handler.go
 package history
 
 import (
@@ -5,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 )
 
 var validIndicators = map[string]bool{
@@ -16,14 +19,54 @@ var validResolutions = map[string]bool{
 	"1m": true, "1h": true,
 }
 
+// decodePoint converts a binary Point.Value back into a JSON-friendly map.
+// indicator is one of sma|ema|rsi|macd|bb|ohlc.
+func decodePoint(indicator string, p Point) map[string]interface{} {
+	ts := p.Ts
+	switch indicator {
+	case "sma", "ema", "rsi":
+		v, err := bincod.DecodeScalar(p.Value)
+		if err != nil {
+			return map[string]interface{}{"ts": ts, "value": nil}
+		}
+		return map[string]interface{}{"ts": ts, "value": v}
+
+	case "macd":
+		macdLine, signalLine, histogram, err := bincod.DecodeMACD(p.Value)
+		if err != nil {
+			return map[string]interface{}{"ts": ts}
+		}
+		return map[string]interface{}{
+			"ts": ts, "macd_line": macdLine,
+			"signal_line": signalLine, "histogram": histogram,
+		}
+
+	case "bb":
+		upper, middle, lower, err := bincod.DecodeBB(p.Value)
+		if err != nil {
+			return map[string]interface{}{"ts": ts}
+		}
+		return map[string]interface{}{
+			"ts": ts, "upper": upper, "middle": middle, "lower": lower,
+		}
+
+	case "ohlc":
+		open, high, low, close, err := bincod.DecodeOHLC(p.Value)
+		if err != nil {
+			return map[string]interface{}{"ts": ts}
+		}
+		return map[string]interface{}{
+			"ts": ts, "open": open, "high": high, "low": low, "close": close,
+		}
+	}
+	return map[string]interface{}{"ts": ts}
+}
+
 // Handler serves GET /history?instrument=101&indicator=sma&hours=3&resolution=1m
 //
-// Fallback policy: only hit Postgres when Redis returns an actual error or
-// zero points. Previously we required >= expectedPoints(hours, resolution)
-// which caused Postgres fallbacks on every request when the backend had been
-// running < hours (e.g. 30min uptime → only 30 points vs 144 required for
-// 3h × 0.8). Under 300-user load that meant 300 simultaneous Postgres queries
-// → 1900ms p95 on /history.
+// Binary Points are decoded to JSON here — this is the only place in the
+// codebase where binary→JSON conversion occurs for history data, and it only
+// runs on the path to the frontend client.
 func Handler(store *Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -74,9 +117,6 @@ func Handler(store *Store) http.HandlerFunc {
 		points, err := store.GetRange(ctx, indicator, instrumentID, resolution, fromUnix, now)
 
 		// --- fall back to Postgres only on error or truly empty ---
-		// Do NOT require a minimum point count — Redis may legitimately have
-		// fewer points than the full window if the server recently restarted.
-		// Serving partial Redis data is always faster than a Postgres round-trip.
 		if err != nil || len(points) == 0 {
 			pgPoints, pgErr := store.FallbackFromPostgres(ctx, indicator, instrumentID, fromUnix, now)
 			if pgErr == nil && len(pgPoints) > 0 {
@@ -87,6 +127,12 @@ func Handler(store *Store) http.HandlerFunc {
 			}
 		}
 
+		// Decode binary members → JSON-friendly maps (frontend boundary)
+		decoded := make([]map[string]interface{}, 0, len(points))
+		for _, p := range points {
+			decoded = append(decoded, decodePoint(indicator, p))
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"instrument": instrumentID,
@@ -95,9 +141,9 @@ func Handler(store *Store) http.HandlerFunc {
 			"hours":      hours,
 			"from":       fromUnix,
 			"to":         now,
-			"count":      len(points),
+			"count":      len(decoded),
 			"source":     source,
-			"points":     points,
+			"points":     decoded,
 		})
 	}
 }

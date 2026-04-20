@@ -1,3 +1,4 @@
+// internal/hub/hub_run.go
 package hub
 
 import (
@@ -8,23 +9,18 @@ import (
 	"time"
 
 	"github.com/riyansh/chat-backend/internal/analytics"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
 // histSem limits concurrent history Redis reads across all clients.
-// 150 goroutines (6 indicators × 25 rooms) firing at once per client connect
-// caused a Redis read storm. Cap at 32 concurrent reads.
-// histSem limits concurrent history Redis reads across all clients.
 // Raised from 32 → 64: at 300 clients each joining 25 rooms, the semaphore
-// was the bottleneck that kept history goroutines queued, causing Send channels
-// to fill before history was delivered and triggering the drop-disconnect logic.
+// was the bottleneck that kept history goroutines queued.
 var histSem = make(chan struct{}, 64)
 
-// maxDroppedMessages: how many consecutive Send-channel misses before we
-// force-disconnect a client. Raised from 5 → 50 so a temporarily slow client
-// (e.g. one receiving a burst of 150 history frames on join) isn't killed before
-// its WritePump drains the backlog. A genuinely dead client will still be
-// evicted — it just gets more runway first.
+// maxDroppedMessages: consecutive Send-channel misses before force-disconnect.
+// Raised from 5 → 50 so a temporarily slow client (burst of 150 history
+// frames on join) isn't killed before its WritePump drains the backlog.
 const maxDroppedMessages = 50
 
 func (h *Hub) Run() {
@@ -90,8 +86,8 @@ func (h *Hub) Run() {
 				instrumentID, err := strconv.Atoi(roomName)
 				if err == nil {
 					go func(client *Client, store *analytics.SMAStore, id int) {
-						histSem <- struct{}{}        // Fix 4: acquire slot
-						defer func() { <-histSem }() // Fix 4: release slot
+						histSem <- struct{}{}
+						defer func() { <-histSem }()
 						for _, res := range []struct {
 							resolution string
 							n          int
@@ -102,7 +98,9 @@ func (h *Hub) Run() {
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
+								if v, err := bincod.DecodeScalar(zMemberBytes(z.Member)); err == nil {
+									points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": v})
+								}
 							}
 							select {
 							case client.Send <- Message{
@@ -129,7 +127,14 @@ func (h *Hub) Run() {
 						}
 						candles := make([]map[string]interface{}, 0, len(entries))
 						for _, z := range entries {
-							candles = append(candles, map[string]interface{}{"ts": int64(z.Score), "candle": z.Member})
+							open, high, low, close, err := bincod.DecodeOHLC(zMemberBytes(z.Member))
+							if err != nil {
+								continue
+							}
+							candles = append(candles, map[string]interface{}{
+								"ts":   int64(z.Score),
+								"open": open, "high": high, "low": low, "close": close,
+							})
 						}
 						select {
 						case client.Send <- Message{
@@ -159,7 +164,9 @@ func (h *Hub) Run() {
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
+								if v, err := bincod.DecodeScalar(zMemberBytes(z.Member)); err == nil {
+									points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": v})
+								}
 							}
 							select {
 							case client.Send <- Message{
@@ -184,14 +191,21 @@ func (h *Hub) Run() {
 						if err != nil || len(entries) == 0 {
 							return
 						}
-						candles := make([]map[string]interface{}, 0, len(entries))
+						bands := make([]map[string]interface{}, 0, len(entries))
 						for _, z := range entries {
-							candles = append(candles, map[string]interface{}{"ts": int64(z.Score), "band": z.Member})
+							upper, middle, lower, err := bincod.DecodeBB(zMemberBytes(z.Member))
+							if err != nil {
+								continue
+							}
+							bands = append(bands, map[string]interface{}{
+								"ts":    int64(z.Score),
+								"upper": upper, "middle": middle, "lower": lower,
+							})
 						}
 						select {
 						case client.Send <- Message{
 							Type: "bb_history",
-							Data: map[string]interface{}{"instrument_id": id, "resolution": "1m", "window": 20, "k": 2.0, "bands": candles},
+							Data: map[string]interface{}{"instrument_id": id, "resolution": "1m", "window": 20, "k": 2.0, "bands": bands},
 						}:
 						default:
 						}
@@ -216,7 +230,9 @@ func (h *Hub) Run() {
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": z.Member})
+								if v, err := bincod.DecodeScalar(zMemberBytes(z.Member)); err == nil {
+									points = append(points, map[string]interface{}{"ts": int64(z.Score), "value": v})
+								}
 							}
 							select {
 							case client.Send <- Message{
@@ -247,7 +263,14 @@ func (h *Hub) Run() {
 							}
 							points := make([]map[string]interface{}, 0, len(entries))
 							for _, z := range entries {
-								points = append(points, map[string]interface{}{"ts": int64(z.Score), "data": z.Member})
+								macdLine, signalLine, histogram, err := bincod.DecodeMACD(zMemberBytes(z.Member))
+								if err != nil {
+									continue
+								}
+								points = append(points, map[string]interface{}{
+									"ts":        int64(z.Score),
+									"macd_line": macdLine, "signal_line": signalLine, "histogram": histogram,
+								})
 							}
 							select {
 							case client.Send <- Message{
@@ -339,6 +362,8 @@ func (h *Hub) Run() {
 				}
 			}
 
+			// chat:events pub-sub stays JSON — it carries room/client messages,
+			// not analytics frames, and is outside the binary-conversion scope.
 			if event.Origin == h.InstanceID {
 				rm := RedisMessage{
 					Room:   event.Room,
@@ -398,5 +423,18 @@ func (h *Hub) Run() {
 			default:
 			}
 		}
+	}
+}
+
+// zMemberBytes normalises the interface{} that go-redis returns for a sorted-set
+// member into []byte.  go-redis v9 with RESP3 returns []byte; RESP2 returns string.
+func zMemberBytes(m interface{}) []byte {
+	switch v := m.(type) {
+	case []byte:
+		return v
+	case string:
+		return []byte(v)
+	default:
+		return []byte(fmt.Sprintf("%v", v))
 	}
 }

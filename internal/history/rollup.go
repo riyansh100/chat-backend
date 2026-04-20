@@ -1,20 +1,21 @@
+// internal/history/rollup.go
 package history
 
 import (
 	"context"
-	"encoding/json"
 	"log"
-	"strconv"
+	"math"
 	"time"
 
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	"github.com/riyansh/chat-backend/internal/domain/trading"
 )
 
 var indicators = []string{"sma", "ema", "rsi", "macd", "bb", "ohlc"}
 
 // StartRollupJob runs the hourly rollup on a ticker.
-// Every hour it reads the last 60 1m entries per indicator per instrument,
-// averages them (or merges for OHLC), and writes to hist:1h.
+// Every hour it reads the last 60 1m binary entries per indicator per
+// instrument, averages (or merges for OHLC), and writes a binary 1h member.
 func StartRollupJob(ctx context.Context, store *Store) {
 	// run once immediately on startup to pre-warm
 	runRollup(ctx, store)
@@ -47,41 +48,37 @@ func runRollup(ctx context.Context, store *Store) {
 }
 
 func rollupOne(ctx context.Context, store *Store, indicator string, instrumentID int, ts int64) error {
-	// fetch last 60 1m points
 	points, err := store.GetLastN(ctx, indicator, instrumentID, "1m", 60)
 	if err != nil || len(points) == 0 {
 		return err
 	}
 
-	var value string
+	var value []byte
 
 	switch indicator {
 	case "sma", "ema", "rsi":
 		value = avgScalar(points)
-
 	case "macd":
 		value = avgMACD(points)
-
 	case "bb":
 		value = avgBB(points)
-
 	case "ohlc":
 		value = mergeOHLC(points)
 	}
 
-	if value == "" {
+	if value == nil {
 		return nil
 	}
 
 	return store.Write1h(ctx, indicator, instrumentID, ts, value)
 }
 
-// avgScalar averages a slice of scalar float points.
-func avgScalar(points []Point) string {
+// avgScalar averages scalar binary points and returns a binary 8-byte member.
+func avgScalar(points []Point) []byte {
 	var sum float64
 	var count int
 	for _, p := range points {
-		v, err := strconv.ParseFloat(p.Value, 64)
+		v, err := bincod.DecodeScalar(p.Value)
 		if err != nil {
 			continue
 		}
@@ -89,110 +86,81 @@ func avgScalar(points []Point) string {
 		count++
 	}
 	if count == 0 {
-		return ""
+		return nil
 	}
-	return strconv.FormatFloat(sum/float64(count), 'f', 6, 64)
+	return bincod.EncodeScalar(sum / float64(count))
 }
 
-// avgMACD averages macd_line, signal_line, histogram across all 1m points.
-func avgMACD(points []Point) string {
+// avgMACD averages macd_line / signal_line / histogram binary points.
+func avgMACD(points []Point) []byte {
 	var macdSum, signalSum, histSum float64
 	var count int
 	for _, p := range points {
-		var m struct {
-			MACDLine   float64 `json:"macd_line"`
-			SignalLine float64 `json:"signal_line"`
-			Histogram  float64 `json:"histogram"`
-		}
-		if err := json.Unmarshal([]byte(p.Value), &m); err != nil {
+		macdLine, signalLine, histogram, err := bincod.DecodeMACD(p.Value)
+		if err != nil {
 			continue
 		}
-		macdSum += m.MACDLine
-		signalSum += m.SignalLine
-		histSum += m.Histogram
+		macdSum += macdLine
+		signalSum += signalLine
+		histSum += histogram
 		count++
 	}
 	if count == 0 {
-		return ""
+		return nil
 	}
-	b, _ := json.Marshal(map[string]float64{
-		"macd_line":   macdSum / float64(count),
-		"signal_line": signalSum / float64(count),
-		"histogram":   histSum / float64(count),
-	})
-	return string(b)
+	n := float64(count)
+	return bincod.EncodeMACD(macdSum/n, signalSum/n, histSum/n)
 }
 
-// avgBB averages upper, middle, lower across all 1m points.
-func avgBB(points []Point) string {
+// avgBB averages upper / middle / lower binary points.
+func avgBB(points []Point) []byte {
 	var upperSum, middleSum, lowerSum float64
 	var count int
 	for _, p := range points {
-		var b struct {
-			Upper  float64 `json:"upper"`
-			Middle float64 `json:"middle"`
-			Lower  float64 `json:"lower"`
-		}
-		if err := json.Unmarshal([]byte(p.Value), &b); err != nil {
+		upper, middle, lower, err := bincod.DecodeBB(p.Value)
+		if err != nil {
 			continue
 		}
-		upperSum += b.Upper
-		middleSum += b.Middle
-		lowerSum += b.Lower
+		upperSum += upper
+		middleSum += middle
+		lowerSum += lower
 		count++
 	}
 	if count == 0 {
-		return ""
+		return nil
 	}
-	out, _ := json.Marshal(map[string]float64{
-		"upper":  upperSum / float64(count),
-		"middle": middleSum / float64(count),
-		"lower":  lowerSum / float64(count),
-	})
-	return string(out)
+	n := float64(count)
+	return bincod.EncodeBB(upperSum/n, middleSum/n, lowerSum/n)
 }
 
-// mergeOHLC builds a proper 1h candle from 1m candles.
-// Open = first candle's open, High = max high, Low = min low, Close = last candle's close.
-func mergeOHLC(points []Point) string {
-	type candle struct {
-		Open  float64 `json:"open"`
-		High  float64 `json:"high"`
-		Low   float64 `json:"low"`
-		Close float64 `json:"close"`
-	}
-
+// mergeOHLC builds a proper 1h candle from 1m binary candles.
+// Open = first open, High = max high, Low = min low, Close = last close.
+func mergeOHLC(points []Point) []byte {
 	var open, high, low, close float64
+	high = -math.MaxFloat64
+	low = math.MaxFloat64
 	first := true
 
 	for _, p := range points {
-		var c candle
-		if err := json.Unmarshal([]byte(p.Value), &c); err != nil {
+		o, h, l, c, err := bincod.DecodeOHLC(p.Value)
+		if err != nil {
 			continue
 		}
 		if first {
-			open = c.Open
-			high = c.High
-			low = c.Low
-			close = c.Close
+			open = o
 			first = false
-			continue
 		}
-		if c.High > high {
-			high = c.High
+		if h > high {
+			high = h
 		}
-		if c.Low < low {
-			low = c.Low
+		if l < low {
+			low = l
 		}
-		close = c.Close
+		close = c
 	}
 
 	if first {
-		return ""
+		return nil
 	}
-
-	out, _ := json.Marshal(map[string]float64{
-		"open": open, "high": high, "low": low, "close": close,
-	})
-	return string(out)
+	return bincod.EncodeOHLC(open, high, low, close)
 }

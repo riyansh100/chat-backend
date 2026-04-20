@@ -1,10 +1,8 @@
-package nats
-
 // internal/nats/client.go
+package nats
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"time"
@@ -55,8 +53,8 @@ func EnsureStream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, erro
 		Name:       StreamName,
 		Subjects:   []string{StreamSubject},
 		Retention:  jetstream.LimitsPolicy,
-		MaxAge:     5 * time.Minute, // analytics events are only useful live
-		MaxMsgSize: 64 * 1024,       // 64 KB ceiling per message
+		MaxAge:     5 * time.Minute,
+		MaxMsgSize: 64 * 1024, // 64 KB — well above our largest frame (46 B)
 		Storage:    jetstream.MemoryStorage,
 		Replicas:   1,
 	})
@@ -77,15 +75,12 @@ func NewPublisher(js jetstream.JetStream) *Publisher {
 	return &Publisher{js: js}
 }
 
-// Publish marshals v and publishes it to analytics.events.
+// Publish sends a pre-encoded binary frame to analytics.events.
+// The caller is responsible for encoding via internal/binary — this function
+// does NOT marshal anything; it writes the raw bytes directly.
 // Errors are logged but not returned — analytics publishing is best-effort.
-func (p *Publisher) Publish(ctx context.Context, v any) {
-	payload, err := json.Marshal(v)
-	if err != nil {
-		log.Printf("[NATS] marshal error: %v", err)
-		return
-	}
-	if _, err := p.js.Publish(ctx, StreamSubject, payload); err != nil {
+func (p *Publisher) Publish(ctx context.Context, frame []byte) {
+	if _, err := p.js.Publish(ctx, StreamSubject, frame); err != nil {
 		log.Printf("[NATS] publish error: %v", err)
 	}
 }

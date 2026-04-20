@@ -3,7 +3,6 @@ package history
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -19,9 +19,12 @@ const (
 	TTL1h = 7 * 24 * time.Hour
 )
 
+// Point is a single history entry.
+// Value is a raw binary member — decode with bincod.DecodeScalar / DecodeOHLC
+// etc. before serialising to JSON for the frontend.
 type Point struct {
 	Ts    int64
-	Value string
+	Value []byte // binary-encoded payload (8 / 24 / 32 bytes depending on indicator)
 }
 
 type Store struct {
@@ -43,7 +46,9 @@ func Key1h(indicator string, instrumentID int) string {
 
 // ---- write (least-loaded primary) ----
 
-func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
+// Write1m stores a binary-encoded value at the given unix-second timestamp.
+// value must be the output of one of the bincod.Encode* functions.
+func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int, ts int64, value []byte) error {
 	key := Key1m(indicator, instrumentID)
 	rdb := s.lb.WriteClient()
 	if err := rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err(); err != nil {
@@ -54,7 +59,7 @@ func (s *Store) Write1m(ctx context.Context, indicator string, instrumentID int,
 	return nil
 }
 
-func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int, ts int64, value string) error {
+func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int, ts int64, value []byte) error {
 	key := Key1h(indicator, instrumentID)
 	rdb := s.lb.WriteClient()
 	if err := rdb.ZAdd(ctx, key, redis.Z{Score: float64(ts), Member: value}).Err(); err != nil {
@@ -66,6 +71,21 @@ func (s *Store) Write1h(ctx context.Context, indicator string, instrumentID int,
 }
 
 // ---- read (scatter-gather across replicas) ----
+
+// zToPoint converts a redis.Z whose Member is a binary []byte (from a
+// go-redis RESP3 reply) or string (RESP2 legacy) into a Point.
+// go-redis v9 returns interface{} — handle both.
+func zToPoint(z redis.Z) Point {
+	ts := int64(z.Score)
+	switch v := z.Member.(type) {
+	case []byte:
+		return Point{Ts: ts, Value: v}
+	case string:
+		return Point{Ts: ts, Value: []byte(v)}
+	default:
+		return Point{Ts: ts, Value: []byte(fmt.Sprintf("%v", v))}
+	}
+}
 
 func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int, resolution string, n int) ([]Point, error) {
 	var key string
@@ -80,7 +100,7 @@ func (s *Store) GetLastN(ctx context.Context, indicator string, instrumentID int
 	}
 	points := make([]Point, 0, len(zs))
 	for _, z := range zs {
-		points = append(points, Point{Ts: int64(z.Score), Value: fmt.Sprintf("%v", z.Member)})
+		points = append(points, zToPoint(z))
 	}
 	return points, nil
 }
@@ -101,13 +121,15 @@ func (s *Store) GetRange(ctx context.Context, indicator string, instrumentID int
 	}
 	points := make([]Point, 0, len(zs))
 	for _, z := range zs {
-		points = append(points, Point{Ts: int64(z.Score), Value: fmt.Sprintf("%v", z.Member)})
+		points = append(points, zToPoint(z))
 	}
 	return points, nil
 }
 
 // ---- Postgres fallback ----
 
+// FallbackFromPostgres reads from Postgres and returns Points with binary
+// members so BackfillRedis can write them straight back.
 func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, instrumentID int, fromUnix, toUnix int64) ([]Point, error) {
 	if s.pool == nil {
 		return nil, fmt.Errorf("no postgres pool")
@@ -149,34 +171,32 @@ func (s *Store) FallbackFromPostgres(ctx context.Context, indicator string, inst
 			if err := rows.Scan(&ts, &val); err != nil {
 				continue
 			}
-			points = append(points, Point{Ts: ts, Value: strconv.FormatFloat(val, 'f', 6, 64)})
+			points = append(points, Point{Ts: ts, Value: bincod.EncodeScalar(val)})
 		case "macd":
 			var macdLine, signalLine, histogram float64
 			if err := rows.Scan(&ts, &macdLine, &signalLine, &histogram); err != nil {
 				continue
 			}
-			b, _ := json.Marshal(map[string]float64{"macd_line": macdLine, "signal_line": signalLine, "histogram": histogram})
-			points = append(points, Point{Ts: ts, Value: string(b)})
+			points = append(points, Point{Ts: ts, Value: bincod.EncodeMACD(macdLine, signalLine, histogram)})
 		case "bb":
 			var upper, middle, lower float64
 			if err := rows.Scan(&ts, &upper, &middle, &lower); err != nil {
 				continue
 			}
-			b, _ := json.Marshal(map[string]float64{"upper": upper, "middle": middle, "lower": lower})
-			points = append(points, Point{Ts: ts, Value: string(b)})
+			points = append(points, Point{Ts: ts, Value: bincod.EncodeBB(upper, middle, lower)})
 		case "ohlc":
 			var open, high, low, close float64
 			if err := rows.Scan(&ts, &open, &high, &low, &close); err != nil {
 				continue
 			}
-			b, _ := json.Marshal(map[string]float64{"open": open, "high": high, "low": low, "close": close})
-			points = append(points, Point{Ts: ts, Value: string(b)})
+			points = append(points, Point{Ts: ts, Value: bincod.EncodeOHLC(open, high, low, close)})
 		}
 	}
 	return points, nil
 }
 
-// BackfillRedis writes Postgres points back to least-loaded primary.
+// BackfillRedis writes Postgres points back to the least-loaded primary.
+// Points must already carry binary members (as returned by FallbackFromPostgres).
 func (s *Store) BackfillRedis(indicator string, instrumentID int, resolution string, points []Point) {
 	ctx := context.Background()
 	var key string
