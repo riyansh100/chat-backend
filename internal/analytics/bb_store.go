@@ -3,13 +3,13 @@ package analytics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -39,17 +39,12 @@ func (s *BBStore) Write(ctx context.Context, event BBUpdateEvent) error {
 }
 
 func (s *BBStore) writeRedis(ctx context.Context, event BBUpdateEvent) error {
-	payload, err := json.Marshal(map[string]interface{}{
-		"upper": event.Upper, "middle": event.Middle,
-		"lower": event.Lower, "ts": event.Timestamp,
-	})
-	if err != nil {
-		return err
-	}
+	// 24-byte binary member replaces the old JSON object string
+	member := bincod.EncodeBB(event.Upper, event.Middle, event.Lower)
 	rdb := s.lb.WriteClient()
 	key := bbKey(event.InstrumentID)
 	ts := float64(time.Now().Unix())
-	if err := rdb.ZAdd(ctx, key, redis.Z{Score: ts, Member: string(payload)}).Err(); err != nil {
+	if err := rdb.ZAdd(ctx, key, redis.Z{Score: ts, Member: member}).Err(); err != nil {
 		return err
 	}
 	rdb.ZRemRangeByRank(ctx, key, 0, -maxBBEntries-1)
