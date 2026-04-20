@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -54,9 +55,10 @@ func (s *SMAStore) writeRedis(ctx context.Context, event SMAUpdateEvent) error {
 	}
 	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
+	member := bincod.EncodeScalar(event.Value) // 8 bytes, replaces FormatFloat string
 	if err := rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
-		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
+		Member: member,
 	}).Err(); err != nil {
 		return err
 	}
@@ -73,7 +75,8 @@ func (s *SMAStore) writePostgres(ctx context.Context, event SMAUpdateEvent) erro
 	return err
 }
 
-// GetLast — concurrent scatter-gather read across all healthy replicas.
+// GetLast returns the last n entries.  Members are binary; callers must decode
+// via bincod.DecodeScalar([]byte(z.Member.(string))).
 func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolution string) ([]redis.Z, error) {
 	var k string
 	if resolution == "1m" {
@@ -84,7 +87,6 @@ func (s *SMAStore) GetLast(ctx context.Context, instrumentID int, n int, resolut
 	return s.lb.ZRangeWithScores(ctx, k, int64(-n), -1).Result()
 }
 
-// GetRange — concurrent scatter-gather read across all healthy replicas.
 func (s *SMAStore) GetRange(ctx context.Context, instrumentID int, fromUnix, toUnix int64, resolution string) ([]redis.Z, error) {
 	var k string
 	if resolution == "1m" {
