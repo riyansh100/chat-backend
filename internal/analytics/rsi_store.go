@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -54,9 +55,10 @@ func (s *RSIStore) writeRedis(ctx context.Context, event RSIUpdateEvent) error {
 	}
 	rdb := s.lb.WriteClient()
 	ts := time.Now().Unix()
+	member := bincod.EncodeScalar(event.Value)
 	if err := rdb.ZAdd(ctx, k, redis.Z{
 		Score:  float64(ts),
-		Member: strconv.FormatFloat(event.Value, 'f', 6, 64),
+		Member: member,
 	}).Err(); err != nil {
 		return err
 	}
