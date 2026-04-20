@@ -42,7 +42,7 @@ func (s *SessionStore) CreateSession(ctx context.Context, clientID int) (string,
 func (s *SessionStore) ValidateSession(ctx context.Context, token string) (int, error) {
 	key := sessionPrefix + token
 
-	// Fix 2: read via lb scatter-gather — distributes 200+ concurrent login
+	// Fix 2: read via lb scatter-gather - distributes 200+ concurrent login
 	// ValidateSession calls across replicas instead of hammering pair2Primary.
 	cmd := s.lb.Get(ctx, key)
 	if cmd.Err() != nil {
