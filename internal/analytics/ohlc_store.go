@@ -3,13 +3,13 @@ package analytics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	bincod "github.com/riyansh/chat-backend/internal/binary"
 	chatredis "github.com/riyansh/chat-backend/internal/redis"
 )
 
@@ -37,18 +37,13 @@ func (s *OHLCStore) Write(ctx context.Context, event OHLCEvent) error {
 }
 
 func (s *OHLCStore) writeRedis(ctx context.Context, event OHLCEvent) error {
-	payload, err := json.Marshal(map[string]interface{}{
-		"open": event.Open, "high": event.High,
-		"low": event.Low, "close": event.Close, "ts": event.Timestamp,
-	})
-	if err != nil {
-		return err
-	}
+	// 32-byte binary member replaces the old JSON object string
+	member := bincod.EncodeOHLC(event.Open, event.High, event.Low, event.Close)
 	rdb := s.lb.WriteClient()
 	key := ohlcKey(event.InstrumentID)
 	if err := rdb.ZAdd(ctx, key, redis.Z{
 		Score:  float64(event.Timestamp),
-		Member: string(payload),
+		Member: member,
 	}).Err(); err != nil {
 		return err
 	}
