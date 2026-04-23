@@ -5,14 +5,15 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"time"
+
 	"github.com/riyansh/chat-backend/internal/background"
+	"github.com/riyansh/chat-backend/internal/config"
 	"github.com/riyansh/chat-backend/internal/history"
 	"github.com/riyansh/chat-backend/internal/hub"
 	"github.com/riyansh/chat-backend/internal/leader"
@@ -30,54 +31,50 @@ func pingNode(ctx context.Context, c *redis.Client, name string) {
 }
 
 func main() {
+	cfg := config.Load()
+	cfg.Print()
+
 	instanceID := uuid.NewString()
 	log.Println("[DataServer] instanceID:", instanceID)
 
 	ctx := context.Background()
 
-	// ---- pair 1: primary :6381 (sentinel :26380), replica :6380 ----
-	pair1Primary := chatredis.NewPair1PrimaryClient()
-	pair1Replica := chatredis.NewPair1ReplicaClient()
+	// ---- Redis clients (addresses from config) ----
+	pair1Primary := chatredis.NewPair1PrimaryClient(cfg)
+	pair1Replica := chatredis.NewPair1ReplicaClient(cfg)
 	defer pair1Primary.Close()
 	defer pair1Replica.Close()
 
-	// ---- pair 2: primary :6383 (sentinel :26381), replica :6382 ----
-	pair2Primary := chatredis.NewPair2PrimaryClient()
-	pair2Replica := chatredis.NewPair2ReplicaClient()
+	pair2Primary := chatredis.NewPair2PrimaryClient(cfg)
+	pair2Replica := chatredis.NewPair2ReplicaClient(cfg)
 	defer pair2Primary.Close()
 	defer pair2Replica.Close()
 
-	pingNode(ctx, pair1Primary, "pair1-primary(:6381)")
-	pingNode(ctx, pair1Replica, "pair1-replica(:6380)")
-	pingNode(ctx, pair2Primary, "pair2-primary(:6383)")
-	pingNode(ctx, pair2Replica, "pair2-replica(:6382)")
+	pingNode(ctx, pair1Primary, "pair1-primary("+cfg.Pair1PrimaryAddr+")")
+	pingNode(ctx, pair1Replica, "pair1-replica("+cfg.Pair1ReplicaAddr+")")
+	pingNode(ctx, pair2Primary, "pair2-primary("+cfg.Pair2PrimaryAddr+")")
+	pingNode(ctx, pair2Replica, "pair2-replica("+cfg.Pair2ReplicaAddr+")")
 
-	// load balancer: writes->least-loaded primary, reads->scatter-gather replicas
 	lb := chatredis.NewRedisLoadBalancer(pair1Primary, pair1Replica, pair2Primary, pair2Replica)
 
-	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
+	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(cfg), 30*time.Second)
 
-	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
-	pool, err := pgxpool.New(ctx, pgConnStr)
+	// ---- Postgres ----
+	pool, err := pgxpool.New(ctx, cfg.PostgresDSN)
 	if err != nil {
 		log.Fatal("postgres connect failed:", err)
 	}
 	defer pool.Close()
 	log.Println("[DataServer] Postgres connected")
 
-	port := os.Getenv("DATA_PORT")
-	if port == "" {
-		port = "8081"
-	}
-
 	// ---- NATS ----
-	natsURL := os.Getenv("NATS_URL") // defaults to nats://localhost:4222
-	nc, err := internalnats.Connect(natsURL)
+	nc, err := internalnats.Connect(cfg.NATSURL)
 	if err != nil {
 		log.Fatal("[DataServer] NATS connect failed:", err)
 	}
 	defer nc.Drain()
 
+	// ---- HTTP ----
 	var hubRef *hub.Hub
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -104,12 +101,13 @@ func main() {
 	})
 
 	go func() {
-		log.Println("[DataServer] HTTP listening on :" + port)
-		if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Println("[DataServer] HTTP listening on :" + cfg.DataPort)
+		if err := http.ListenAndServe(":"+cfg.DataPort, nil); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
+	// ---- leader election ----
 	elect := leader.NewElection(pair1Primary, instanceID)
 
 	elect.Run(ctx,
@@ -120,13 +118,9 @@ func main() {
 			hubRef = h
 			go h.Run()
 
-			feedSource := os.Getenv("FEED_SOURCE")
-			if feedSource == "" {
-				feedSource = "binance"
-			}
-			bgWorker := background.NewWorker(feedSource, h.Registry())
+			bgWorker := background.NewWorker(cfg.FeedSource, h.Registry())
 			go bgWorker.Start(leaderCtx)
-			log.Printf("[DataServer] analytics worker started (source=%s)", feedSource)
+			log.Printf("[DataServer] analytics worker started (source=%s)", cfg.FeedSource)
 
 			histStore := history.NewStore(lb, pool)
 			go history.StartRollupJob(leaderCtx, histStore)

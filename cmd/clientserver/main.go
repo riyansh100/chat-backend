@@ -5,7 +5,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/riyansh/chat-backend/internal/auth"
+	"github.com/riyansh/chat-backend/internal/config"
 	"github.com/riyansh/chat-backend/internal/history"
 	"github.com/riyansh/chat-backend/internal/hub"
 	internalnats "github.com/riyansh/chat-backend/internal/nats"
@@ -36,37 +36,39 @@ func pingNode(ctx context.Context, c *redis.Client, name string) {
 }
 
 func main() {
+	cfg := config.Load()
+	cfg.Print()
+
 	instanceID := uuid.NewString()
 	log.Println("[ClientServer] instanceID:", instanceID)
 
 	ctx := context.Background()
 
-	// ---- pair 1: primary :6381 (sentinel :26380), replica :6380 ----
-	pair1Primary := chatredis.NewPair1PrimaryClient()
-	pair1Replica := chatredis.NewPair1ReplicaClient()
+	// ---- Redis clients (addresses from config) ----
+	pair1Primary := chatredis.NewPair1PrimaryClient(cfg)
+	pair1Replica := chatredis.NewPair1ReplicaClient(cfg)
 	defer pair1Primary.Close()
 	defer pair1Replica.Close()
 
-	// ---- pair 2: primary :6383 (sentinel :26381), replica :6382 ----
-	pair2Primary := chatredis.NewPair2PrimaryClient()
-	pair2Replica := chatredis.NewPair2ReplicaClient()
+	pair2Primary := chatredis.NewPair2PrimaryClient(cfg)
+	pair2Replica := chatredis.NewPair2ReplicaClient(cfg)
 	defer pair2Primary.Close()
 	defer pair2Replica.Close()
 
-	pingNode(ctx, pair1Primary, "pair1-primary(:6381)")
-	pingNode(ctx, pair1Replica, "pair1-replica(:6380)")
-	pingNode(ctx, pair2Primary, "pair2-primary(:6383)")
-	pingNode(ctx, pair2Replica, "pair2-replica(:6382)")
+	pingNode(ctx, pair1Primary, "pair1-primary("+cfg.Pair1PrimaryAddr+")")
+	pingNode(ctx, pair1Replica, "pair1-replica("+cfg.Pair1ReplicaAddr+")")
+	pingNode(ctx, pair2Primary, "pair2-primary("+cfg.Pair2PrimaryAddr+")")
+	pingNode(ctx, pair2Replica, "pair2-replica("+cfg.Pair2ReplicaAddr+")")
 
 	lb := chatredis.NewRedisLoadBalancer(pair1Primary, pair1Replica, pair2Primary, pair2Replica)
 
-	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(), 30*time.Second)
+	redisCache := chatredis.NewRedisCache(chatredis.NewSentinelUniversalClient(cfg), 30*time.Second)
 
-	pgConnStr := "postgres://postgres:pwd@localhost:5432/marketdata?sslmode=disable"
-	cfg, _ := pgxpool.ParseConfig(pgConnStr)
-	cfg.MaxConns = 50
-	cfg.MinConns = 4
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	// ---- Postgres ----
+	pgCfg, _ := pgxpool.ParseConfig(cfg.PostgresDSN)
+	pgCfg.MaxConns = cfg.PGMaxConns
+	pgCfg.MinConns = cfg.PGMinConns
+	pool, err := pgxpool.NewWithConfig(ctx, pgCfg)
 	if err != nil {
 		log.Fatal("postgres connect failed:", err)
 	}
@@ -74,8 +76,7 @@ func main() {
 	log.Println("[ClientServer] Postgres connected")
 
 	// ---- NATS ----
-	natsURL := os.Getenv("NATS_URL")
-	nc, err := internalnats.Connect(natsURL)
+	nc, err := internalnats.Connect(cfg.NATSURL)
 	if err != nil {
 		log.Fatal("[ClientServer] NATS connect failed:", err)
 	}
@@ -113,12 +114,8 @@ func main() {
 		ws.ServeWS(h, sessionStore, w, r)
 	})
 
-	port := os.Getenv("CLIENT_PORT")
-	if port == "" {
-		port = "8080"
-	}
-	log.Println("[ClientServer] started on :" + port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	log.Println("[ClientServer] started on :" + cfg.ClientPort)
+	if err := http.ListenAndServe(":"+cfg.ClientPort, nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -127,7 +124,7 @@ func main() {
 // each analytics event to the hub using natsWorkers parallel goroutines.
 //
 // Binary frames: the dataserver now publishes raw binary frames (22–46 bytes)
-// instead of JSON envelopes (~80–120 bytes).  Workers call
+// instead of JSON envelopes (~80–120 bytes). Workers call
 // hub.DecodeFrameToMessage which decodes the binary frame and returns a
 // hub.Message ready to push to WebSocket clients (which still receive JSON).
 //
@@ -166,9 +163,6 @@ func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 	for i := 0; i < natsWorkers; i++ {
 		go func() {
 			for msg := range workCh {
-				// DecodeFrameToMessage: binary frame → room string + hub.Message
-				// The hub.Message.Data is a plain map that will be JSON-marshalled
-				// only when written to the WebSocket — the binary→JSON boundary.
 				room, hubMsg, err := hub.DecodeFrameToMessage(msg.Data())
 				if err != nil {
 					log.Printf("[NATS worker] decode error: %v", err)
@@ -178,12 +172,11 @@ func consumeAnalyticsEvents(ctx context.Context, nc *nats.Conn, h *hub.Hub) {
 				// Push model: broadcast to everyone in the room
 				h.Broadcast <- hub.BroadcastEvent{
 					Room:    room,
-					Origin:  "", // not echoed back via Redis pub-sub
+					Origin:  "",
 					Message: hubMsg,
 				}
 
 				// Pull model: fan out to topic subscribers
-				// Topic format matches what the dataserver used to encode: "sma:101" etc.
 				topic := hubMsg.Type[:len(hubMsg.Type)-len("_update")] + ":" + room
 				h.SubManager().Fanout(topic, hubMsg)
 			}
