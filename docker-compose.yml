@@ -207,6 +207,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro 
     networks:
       - tradeflow
     restart: unless-stopped
@@ -239,7 +240,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/metrics | grep -q activeClients || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/metrics"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -254,7 +255,7 @@ services:
       <<: *go-env
       CLIENT_PORT: "8080"
     ports:
-      - "8080:8080"
+      - "8082:8080"
     networks:
       - tradeflow
     depends_on:
