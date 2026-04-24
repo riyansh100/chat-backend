@@ -1,0 +1,29 @@
+# git
+.git
+.gitignore
+
+# logs
+*.log
+
+# test/load tools
+locustfile.py
+ws-consumer
+ws-consumer-eth
+ws-load-tester
+ws-pull-tester
+
+# local redis confs (not needed inside containers)
+redis-*.conf
+sentinel.conf
+redis-sentinel2.conf
+
+# node / frontend build artifacts
+node_modules
+dist
+
+# mac junk
+__MACOSX
+.DS_Store
+
+# env secrets — never bake into image
+.env
