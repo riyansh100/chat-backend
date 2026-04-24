@@ -1,0 +1,284 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TradeFlow — full stack
+#
+# Bring up:   docker compose up -d
+# Tear down:  docker compose down -v
+# Rebuild Go: docker compose build dataserver clientserver
+#
+# Healthcheck chain guarantees startup order:
+#   Redis pair1 primaries → sentinels → NATS → Postgres
+#     → dataserver → clientserver → nginx
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  tradeflow:
+    driver: bridge
+
+volumes:
+  redis_pair1_primary_data:
+  redis_pair1_replica_data:
+  redis_pair2_primary_data:
+  redis_pair2_replica_data:
+  postgres_data:
+  nats_data:
+
+# ─── common env passed to both Go binaries ────────────────────────────────────
+x-go-env: &go-env
+  POSTGRES_DSN:            ${POSTGRES_DSN:-postgres://postgres:pwd@postgres:5432/marketdata?sslmode=disable}
+  NATS_URL:                ${NATS_URL:-nats://nats:4222}
+  FEED_SOURCE:             ${FEED_SOURCE:-binance}
+  REDIS_PAIR1_PRIMARY:     redis-pair1-primary:6381
+  REDIS_PAIR1_REPLICA:     redis-pair1-replica:6380
+  REDIS_PAIR1_SENTINEL:    redis-sentinel1:26380
+  REDIS_PAIR1_MASTER:      ${REDIS_PAIR1_MASTER:-mymaster}
+  REDIS_PAIR2_PRIMARY:     redis-pair2-primary:6383
+  REDIS_PAIR2_REPLICA:     redis-pair2-replica:6382
+  REDIS_PAIR2_SENTINEL:    redis-sentinel2:26381
+  REDIS_PAIR2_MASTER:      ${REDIS_PAIR2_MASTER:-mymaster2}
+  REDIS_POOL_SIZE:         ${REDIS_POOL_SIZE:-10}
+  REDIS_DIAL_TIMEOUT:      ${REDIS_DIAL_TIMEOUT:-5s}
+  REDIS_READ_TIMEOUT:      ${REDIS_READ_TIMEOUT:-3s}
+  SESSION_TTL_HOURS:       ${SESSION_TTL_HOURS:-24}
+  PG_MAX_CONNS:            ${PG_MAX_CONNS:-50}
+  PG_MIN_CONNS:            ${PG_MIN_CONNS:-4}
+
+services:
+
+  # ─── Redis pair 1 ──────────────────────────────────────────────────────────
+  redis-pair1-primary:
+    image: redis:7-alpine
+    command: redis-server --port 6381 --bind 0.0.0.0 --loglevel notice
+    ports:
+      - "6381:6381"
+    volumes:
+      - redis_pair1_primary_data:/data
+    networks:
+      - tradeflow
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6381", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-pair1-replica:
+    image: redis:7-alpine
+    command: redis-server --port 6380 --bind 0.0.0.0 --replicaof redis-pair1-primary 6381 --loglevel notice
+    ports:
+      - "6380:6380"
+    volumes:
+      - redis_pair1_replica_data:/data
+    networks:
+      - tradeflow
+    depends_on:
+      redis-pair1-primary:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-sentinel1:
+    image: redis:7-alpine
+    # sentinel needs to resolve "redis-pair1-primary" by DNS, so we write
+    # the config at runtime via sh instead of mounting a static file.
+    command: >
+      sh -c "
+        echo 'port 26380' > /tmp/sentinel.conf &&
+        echo 'bind 0.0.0.0' >> /tmp/sentinel.conf &&
+        echo 'sentinel monitor mymaster redis-pair1-primary 6381 1' >> /tmp/sentinel.conf &&
+        echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf &&
+        echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf &&
+        echo 'sentinel resolve-hostnames yes' >> /tmp/sentinel.conf &&
+        echo 'sentinel announce-hostnames yes' >> /tmp/sentinel.conf &&
+        redis-sentinel /tmp/sentinel.conf
+      "
+    ports:
+      - "26380:26380"
+    networks:
+      - tradeflow
+    depends_on:
+      redis-pair1-primary:
+        condition: service_healthy
+      redis-pair1-replica:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26380", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Redis pair 2 ──────────────────────────────────────────────────────────
+  redis-pair2-primary:
+    image: redis:7-alpine
+    command: redis-server --port 6383 --bind 0.0.0.0 --loglevel notice
+    ports:
+      - "6383:6383"
+    volumes:
+      - redis_pair2_primary_data:/data
+    networks:
+      - tradeflow
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6383", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-pair2-replica:
+    image: redis:7-alpine
+    command: redis-server --port 6382 --bind 0.0.0.0 --replicaof redis-pair2-primary 6383 --loglevel notice
+    ports:
+      - "6382:6382"
+    volumes:
+      - redis_pair2_replica_data:/data
+    networks:
+      - tradeflow
+    depends_on:
+      redis-pair2-primary:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6382", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis-sentinel2:
+    image: redis:7-alpine
+    command: >
+      sh -c "
+        echo 'port 26381' > /tmp/sentinel2.conf &&
+        echo 'bind 0.0.0.0' >> /tmp/sentinel2.conf &&
+        echo 'sentinel monitor mymaster2 redis-pair2-primary 6383 1' >> /tmp/sentinel2.conf &&
+        echo 'sentinel down-after-milliseconds mymaster2 5000' >> /tmp/sentinel2.conf &&
+        echo 'sentinel failover-timeout mymaster2 10000' >> /tmp/sentinel2.conf &&
+        echo 'sentinel resolve-hostnames yes' >> /tmp/sentinel2.conf &&
+        echo 'sentinel announce-hostnames yes' >> /tmp/sentinel2.conf &&
+        redis-sentinel /tmp/sentinel2.conf
+      "
+    ports:
+      - "26381:26381"
+    networks:
+      - tradeflow
+    depends_on:
+      redis-pair2-primary:
+        condition: service_healthy
+      redis-pair2-replica:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "26381", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── NATS JetStream ────────────────────────────────────────────────────────
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-sd", "/data"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"   # NATS monitoring UI
+    volumes:
+      - nats_data:/data
+    networks:
+      - tradeflow
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Postgres ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pwd}
+      POSTGRES_DB:       ${POSTGRES_DB:-marketdata}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - tradeflow
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-marketdata}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── TradeFlow dataserver ──────────────────────────────────────────────────
+  dataserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.dataserver
+    environment:
+      <<: *go-env
+      DATA_PORT: "8081"
+    ports:
+      - "8081:8081"
+    networks:
+      - tradeflow
+    depends_on:
+      redis-sentinel1:
+        condition: service_healthy
+      redis-sentinel2:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/metrics | grep -q activeClients || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ─── TradeFlow clientserver ────────────────────────────────────────────────
+  clientserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.clientserver
+    environment:
+      <<: *go-env
+      CLIENT_PORT: "8080"
+    ports:
+      - "8080:8080"
+    networks:
+      - tradeflow
+    depends_on:
+      dataserver:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health 2>/dev/null || wget -qO- http://localhost:8080/login 2>/dev/null; exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ─── Nginx reverse proxy ───────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.docker.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro   # serves the frontend too
+    networks:
+      - tradeflow
+    depends_on:
+      - dataserver
+      - clientserver
+    restart: unless-stopped
