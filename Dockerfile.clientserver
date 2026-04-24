@@ -1,10 +1,14 @@
 # syntax=docker/dockerfile:1
 
 # ─── Stage 1: build ───────────────────────────────────────────────────────────
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
+
+
+# allow Go to auto-download the 1.25.5 toolchain declared in go.mod
+ENV GOTOOLCHAIN=auto
 COPY go.mod go.sum ./
 RUN go mod download
 
