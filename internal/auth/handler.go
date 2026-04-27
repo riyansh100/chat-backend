@@ -51,7 +51,7 @@ func isClientGone(err error) bool {
 	}
 	s := err.Error()
 	return strings.Contains(s, "context canceled") ||
-		strings.Contains(s, "context deadline exceeded")
+		strings.Contains(s, "context deadline exeeded.")
 }
 
 // POST /login
