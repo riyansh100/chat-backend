@@ -1,0 +1,63 @@
+
+name: CI
+
+on:
+
+  push:
+
+    branches: ["**"]
+
+  pull_request:
+
+    branches: [main]
+
+jobs:
+
+  build-and-lint:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout code
+
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+
+        uses: actions/setup-go@v5
+
+        with:
+
+          go-version-file: go.mod
+
+          cache: true
+
+      - name: Build dataserver
+
+        run: go build ./cmd/dataserver/...
+
+      - name: Build clientserver
+
+        run: go build ./cmd/clientserver/...
+
+      - name: Run go vet
+
+        run: go vet ./...
+
+      - name: Run golangci-lint
+
+        uses: golangci/golangci-lint-action@v6
+
+        with:
+
+          version: latest
+
+      - name: Build Docker images
+
+        run: |
+
+          docker build -f Dockerfile.dataserver -t tradeflow-dataserver:ci .
+
+          docker build -f Dockerfile.clientserver -t tradeflow-clientserver:ci .
+

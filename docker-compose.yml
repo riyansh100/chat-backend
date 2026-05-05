@@ -219,9 +219,8 @@ services:
 
   # ─── TradeFlow dataserver ──────────────────────────────────────────────────
   dataserver:
-    build:
-      context: .
-      dockerfile: Dockerfile.dataserver
+
+    image: ghcr.io/riyansh100/tradeflow-dataserver:latest
     environment:
       <<: *go-env
       DATA_PORT: "8081"
@@ -248,9 +247,7 @@ services:
 
   # ─── TradeFlow clientserver ────────────────────────────────────────────────
   clientserver:
-    build:
-      context: .
-      dockerfile: Dockerfile.clientserver
+    image: ghcr.io/riyansh100/tradeflow-clientserver:latest
     environment:
       <<: *go-env
       CLIENT_PORT: "8080"

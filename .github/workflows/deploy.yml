@@ -1,0 +1,105 @@
+
+name: Deploy
+
+on:
+
+  push:
+
+    branches: [main]
+
+env:
+
+  REGISTRY: ghcr.io
+
+  IMAGE_PREFIX: ghcr.io/riyansh100
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    permissions:
+
+      contents: read
+
+      packages: write
+
+    steps:
+
+      - name: Checkout code
+
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+
+        uses: docker/login-action@v3
+
+        with:
+
+          registry: ghcr.io
+
+          username: ${{ github.actor }}
+
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push dataserver
+
+        uses: docker/build-push-action@v5
+
+        with:
+
+          context: .
+
+          file: Dockerfile.dataserver
+
+          push: true
+
+          tags: |
+
+            ${{ env.IMAGE_PREFIX }}/tradeflow-dataserver:${{ github.sha }}
+
+            ${{ env.IMAGE_PREFIX }}/tradeflow-dataserver:latest
+
+      - name: Build and push clientserver
+
+        uses: docker/build-push-action@v5
+
+        with:
+
+          context: .
+
+          file: Dockerfile.clientserver
+
+          push: true
+
+          tags: |
+
+            ${{ env.IMAGE_PREFIX }}/tradeflow-clientserver:${{ github.sha }}
+
+            ${{ env.IMAGE_PREFIX }}/tradeflow-clientserver:latest
+
+      - name: Deploy via SSH
+
+        uses: appleboy/ssh-action@v1
+
+        with:
+
+          host: ${{ secrets.SSH_HOST }}
+
+          username: ${{ secrets.SSH_USER }}
+
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+          script: |
+
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            docker compose pull
+
+            docker compose up -d
+
+            docker image prune -f
+
