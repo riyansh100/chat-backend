@@ -1,0 +1,14 @@
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - errcheck
+
+run:
+  go: "1.24"
+
+issues:
+  max-issues-per-linter: 20
+  max-same-issues: 5
