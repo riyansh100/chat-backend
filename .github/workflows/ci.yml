@@ -17,7 +17,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'   # reads go 1.25.5 from go.mod automatically
+          go-version: '1.25.5'
 
       - name: Build dataserver
         run: go build ./cmd/dataserver/...
