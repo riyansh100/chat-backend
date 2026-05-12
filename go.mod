@@ -1,6 +1,8 @@
 module github.com/riyansh/chat-backend
 
-go 1.25.5
+go 1.24
+
+toolchain go1.24.3
 
 require (
 	github.com/dgraph-io/ristretto v0.2.0
