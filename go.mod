@@ -9,7 +9,6 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/nats-io/nats.go v1.38.0
 	github.com/redis/go-redis/v9 v9.17.2
-//go get github.com/dgraph-io/ristretto v0.0.0-20240905000000-000000000000
 )
 
 require (
