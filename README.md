@@ -1,4 +1,4 @@
-# TradeFlow
+# TrradeFlow
 
 A distributed real-time market data backend in Go. Ingests live Binance price feeds across 300 instruments, runs 6 streaming analytics engines, and pushes indicator updates to authenticated WebSocket consumers through a two-server split architecture.
 
@@ -194,6 +194,65 @@ Zero drops across both phases. Heap stable regardless of client count.
 
 ---
 
+## CI/CD Pipeline
+
+### Overview
+
+The pipeline is split into two GitHub Actions workflows:
+
+- **CI** (`.github/workflows/ci.yml`) — runs on every push to any branch
+- **Deploy** (`.github/workflows/deploy.yml`) — runs on push to `main` only
+
+### CI Workflow
+
+Runs on `ubuntu-latest`. Steps:
+
+1. Checkout code
+2. Set up Go 1.25.5 (matches `go.mod` — required by `golang.org/x/sync`, `golang.org/x/text`, `golang.org/x/mod` which all declare `go 1.25.0` as minimum)
+3. Build `dataserver` — `go build ./cmd/dataserver/...`
+4. Build `clientserver` — `go build ./cmd/clientserver/...`
+5. Run `go vet ./...`
+6. Run `golangci-lint` v1.64.8
+7. Build both Docker images to verify Dockerfiles are valid
+
+### Deploy Workflow
+
+Runs on push to `main` only. Steps:
+
+1. Checkout code
+2. Disable macOS keychain credential store (sets `credsStore` to empty in `~/.docker/config.json`)
+3. Log in to GHCR using `GHCR_TOKEN` and `GHCR_USER` secrets
+4. Build and push `tradeflow-dataserver` image to GHCR (tagged with commit SHA + `latest`)
+5. Build and push `tradeflow-clientserver` image to GHCR (tagged with commit SHA + `latest`)
+6. SSH into deployment server and run `docker compose pull && docker compose up -d`
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `GHCR_TOKEN` | GitHub Personal Access Token with `write:packages`, `read:packages` scopes |
+| `GHCR_USER` | GitHub username (e.g. `riyansh100`) |
+| `SSH_HOST` | Public IP of the deployment server |
+| `SSH_USER` | SSH username on the deployment server |
+| `SSH_PORT` | SSH port on the deployment server |
+| `SSH_PRIVATE_KEY` | Private key corresponding to the server's authorized public key |
+| `DEPLOY_PATH` | Path on the server where `docker-compose.yml` lives |
+
+### Go Version Note
+
+`go.mod` declares `go 1.25.5`. This is required by transitive dependencies (`golang.org/x/sync@v0.20.0`, `golang.org/x/text@v0.36.0`). Both the CI workflow and the Dockerfiles must use `golang:1.25-alpine` — using 1.24 causes `golangci-lint` typecheck failures across every package.
+
+### Deployment Target
+
+The deploy workflow SSHes into a server and runs `docker compose pull && docker compose up -d`. The server must have Docker and Docker Compose installed. Recommended providers:
+
+- **Oracle Cloud Free Tier** — permanently free, 4 CPU / 24GB RAM (Ampere A1)
+- **Hetzner CAX11** — €3.29/month, 2 CPU / 4GB RAM
+
+A local machine behind a home or office network is not suitable — corporate networks block inbound connections and prevent the required port forwarding.
+
+---
+
 ## Running — Mac (backend)
 
 ```bash
@@ -238,7 +297,7 @@ GET  /health               200 ok
 
 ## Tech Stack
 
-Go · Redis (Sorted Sets, Pub/Sub, Sentinel) · Postgres (pgx/v5) · gorilla/websocket · Ristretto (L1 cache) · nginx (least_conn WS proxy) · LightweightCharts v4.1.3
+Go · Redis (Sorted Sets, Pub/Sub, Sentinel) · Postgres (pgx/v5) · gorilla/websocket · Ristretto (L1 cache) · nginx (least_conn WS proxy) · LightweightCharts v4.1.3 · Docker · GitHub Actions (CI/CD)
 
 ---
 
