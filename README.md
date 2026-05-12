@@ -222,8 +222,8 @@ Runs on push to `main` only. Steps:
 1. Checkout code
 2. Disable macOS keychain credential store (sets `credsStore` to empty in `~/.docker/config.json`)
 3. Log in to GHCR using `GHCR_TOKEN` and `GHCR_USER` secrets
-4. Build and push `tradeflow-dataserver` image to GHCR (tagged with commit SHA + `latest`)
-5. Build and push `tradeflow-clientserver` image to GHCR (tagged with commit SHA + `latest`)
+4. Build and push `trradeflow-dataserver` image to GHCR (tagged with commit SHA + `latest`)
+5. Build and push `trradeflow-clientserver` image to GHCR (tagged with commit SHA + `latest`)
 6. SSH into deployment server and run `docker compose pull && docker compose up -d`
 
 ### Required GitHub Secrets
