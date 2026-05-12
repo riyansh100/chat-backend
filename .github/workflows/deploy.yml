@@ -1,34 +1,23 @@
-
 name: Deploy
 
 on:
-
   push:
-
     branches: [main]
 
 env:
-
   REGISTRY: ghcr.io
-
   IMAGE_PREFIX: ghcr.io/riyansh100
 
 jobs:
-
   deploy:
-
     runs-on: ubuntu-latest
 
     permissions:
-
       contents: read
-
       packages: write
 
     steps:
-
       - name: Checkout code
-
         uses: actions/checkout@v4
 
       - name: Disable Docker keychain credential store
@@ -39,62 +28,40 @@ jobs:
       - name: Log in to GHCR
         run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
 
-
       - name: Build and push dataserver
-
         uses: docker/build-push-action@v5
-
         with:
-
           context: .
-
           file: Dockerfile.dataserver
-
           push: true
-
           tags: |
-
             ${{ env.IMAGE_PREFIX }}/tradeflow-dataserver:${{ github.sha }}
-
             ${{ env.IMAGE_PREFIX }}/tradeflow-dataserver:latest
 
       - name: Build and push clientserver
-
         uses: docker/build-push-action@v5
-
         with:
-
           context: .
-
           file: Dockerfile.clientserver
-
           push: true
-
           tags: |
-
             ${{ env.IMAGE_PREFIX }}/tradeflow-clientserver:${{ github.sha }}
-
             ${{ env.IMAGE_PREFIX }}/tradeflow-clientserver:latest
 
       - name: Deploy via SSH
-
         uses: appleboy/ssh-action@v1
-
         with:
-
           host: ${{ secrets.SSH_HOST }}
-
           username: ${{ secrets.SSH_USER }}
-
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-
           port: ${{ secrets.SSH_PORT }}
-
           script: |
             export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin
             cd ${{ secrets.DEPLOY_PATH }}
-            echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # Use GHCR_TOKEN (not the built-in GITHUB_TOKEN which lacks pull scope)
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
+
             docker compose pull
             docker compose up -d
             docker image prune -f
-
