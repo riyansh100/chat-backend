@@ -915,13 +915,18 @@ function handleMessage(msg) {
     case 'ohlc_update': {
       const close = parseFloat(data?.close ?? data?.price);
       if (!isNaN(close)) { state.price = close; updateSidebarPrice(currentRoom, close); }
-      if (data?.open != null) state.open = data.open;
-      if (data?.high != null) state.high = data.high;
-      if (data?.low  != null) state.low  = data.low;
-      const co = parseFloat(data?.open ?? state.open ?? close);
-      const ch = parseFloat(data?.high ?? state.high ?? close);
-      const cl = parseFloat(data?.low  ?? state.low  ?? close);
       const c  = ensureCache(currentRoom);
+      const last = c.candles.at(-1);
+      const newBucket = !last || last.time !== nowSec;
+      const co = parseFloat(data?.open ?? (newBucket ? close : last.open));
+      const ch = parseFloat(data?.high ?? (newBucket ? close : Math.max(last.high, close)));
+      const cl = parseFloat(data?.low  ?? (newBucket ? close : Math.min(last.low, close)));
+      if (newBucket) {
+        state.open = co; state.high = ch; state.low = cl;
+      } else {
+        if (data?.high != null) state.high = Math.max(parseFloat(state.high ?? ch), parseFloat(data.high));
+        if (data?.low  != null) state.low  = Math.min(parseFloat(state.low  ?? cl), parseFloat(data.low));
+      }
       upsertCandle(c.candles, nowSec, co, ch, cl, close);
       state.lastUpdated = new Date();
       patchPriceHero(); patchOHLC(); updateLastUpdated(); updateLegendPrice();
