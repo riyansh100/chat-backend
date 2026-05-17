@@ -1,4 +1,4 @@
-# TrradeFlow
+# TradeFlow
 
 A distributed real-time market data backend in Go. Ingests live Binance price feeds across 300 instruments, runs 6 streaming analytics engines, and pushes indicator updates to authenticated WebSocket consumers through a two-server split architecture.
 
