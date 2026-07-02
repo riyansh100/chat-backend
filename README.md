@@ -4,6 +4,14 @@ A distributed real-time market data backend in Go. Ingests live Binance price fe
 
 ---
 
+## Demo
+
+<!-- Drop the video link below (e.g. an uploaded .mp4 in the repo, a GitHub asset URL, or a YouTube link) -->
+
+📹 **[Watch the demo](PASTE_VIDEO_LINK_HERE)**
+
+---
+
 ## Architecture
 
 ```
