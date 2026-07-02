@@ -8,7 +8,7 @@ A distributed real-time market data backend in Go. Ingests live Binance price fe
 
 <!-- Drop the video link below (e.g. an uploaded .mp4 in the repo, a GitHub asset URL, or a YouTube link) -->
 
-📹 **[Watch the demo](PASTE_VIDEO_LINK_HERE)**
+📹 **[Watch the demo](https://github.com/riyansh100/chat-backend/blob/c27cfb3becfd4e8908cec55b5273e41a8ef22247/TradeFlow%20recording.mp4)**
 
 ---
 
